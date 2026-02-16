@@ -1,0 +1,130 @@
+/**
+ * Стили печати — скрыть меню, кнопки, оставить только print-area
+ */
+
+/* Элементы только для печати — скрыты на экране */
+.print-only {
+  display: none !important;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+  }
+
+  /* Скрыть всё, кроме печатной области */
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    background: white !important;
+    color: #1a1a1a !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Скрыть элементы с классом no-print */
+  .no-print,
+  .no-print * {
+    visibility: hidden !important;
+    display: none !important;
+  }
+
+  /* Сайдбар, хедер, панель ИИ — не печатать */
+  aside,
+  header,
+  nav,
+  [role="navigation"],
+  .sidebar,
+  .header-top,
+  .panel-right-border {
+    display: none !important;
+  }
+
+  /* Таблицы — границы для печати */
+  .print-area table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .print-area table th,
+  .print-area table td {
+    border: 1px solid #333 !important;
+    padding: 6px 8px !important;
+    color: #1a1a1a !important;
+    background: white !important;
+  }
+
+  .print-area table th {
+    background: #f0f0f0 !important;
+    font-weight: 600;
+  }
+
+  /* Заголовок документа */
+  .print-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #1a1a1a !important;
+  }
+
+  .print-subtitle {
+    font-size: 14px;
+    color: #444 !important;
+    margin-bottom: 12px;
+  }
+
+  /* Убрать фоны и тени */
+  .print-area .bg-accent-3\/80,
+  .print-area .bg-dark-900,
+  .print-area .rounded-xl {
+    background: white !important;
+    border: 1px solid #ddd !important;
+    border-radius: 0 !important;
+  }
+
+  /* Ссылки — показать как текст */
+  .print-area a {
+    color: #1a1a1a !important;
+    text-decoration: none;
+  }
+
+  /* Кнопки, инпуты и селекты в print-area — скрыть (значения видны при печати) */
+  .print-area button,
+  .print-area input[type="button"],
+  .print-area input[type="submit"],
+  .print-area [role="button"] {
+    display: none !important;
+  }
+
+  /* Селекты — показать как текст (браузер обычно выводит выбранное значение) */
+  .print-area select {
+    border: none !important;
+    background: transparent !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+  }
+
+  /* Страница */
+  @page {
+    margin: 1.5cm;
+    size: A4;
+  }
+
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

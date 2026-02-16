@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Светлая тема: текст #ECECEC, акценты #84934A #656D3F #492828 */
+/* Тёмная тема: текст #FDEB9E, акценты #000B58 #003161 #006A67 */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html {
+    color-scheme: light;
+    --color-primary-500: #84934A;
+    --color-primary-600: #656D3F;
+    --color-primary-700: #492828;
+    --accent-1: #84934A;
+    --accent-2: #656D3F;
+    --accent-3: #492828;
+    --text-primary: #ECECEC;
+    --bg-main: #656D3F;
+    --bg-sidebar: #492828;
+  }
+  html.dark {
+    color-scheme: dark;
+    --color-primary-500: #006A67;
+    --color-primary-600: #003161;
+    --color-primary-700: #000B58;
+    --accent-1: #000B58;
+    --accent-2: #003161;
+    --accent-3: #006A67;
+    --text-primary: #FDEB9E;
+    --bg-main: #000B58;
+    --bg-sidebar: #001a3d;
+  }
+}
+
+body {
+  @apply antialiased;
+  color: var(--text-primary);
+  background-color: var(--bg-main);
+  font-family: var(--app-font, system-ui, -apple-system, sans-serif);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Адаптив: таблицы с горизонтальным скроллом на мобильном */
+.table-responsive {
+  @apply overflow-x-auto -mx-3 sm:mx-0;
+}
+.table-responsive table {
+  @apply min-w-[600px] sm:min-w-0;
+}
+
+
+/* Header: ровные линии 1px, полупрозрачные */
+.header-top {
+  height: 56px;
+  min-height: 56px;
+  max-height: 56px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+html.dark .header-top {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+.sidebar-header-border {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+html.dark .sidebar-header-border {
+  border-right-color: rgba(255, 255, 255, 0.2);
+}
+/* Правая панель: линия как слева, но белая полупрозрачная */
+.panel-right-border {
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+html.dark .panel-right-border {
+  border-left-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Современные узкие скроллбары */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+html.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+/* WebKit (Chrome, Safari, Edge) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Анимации страниц — плавные, с мягким easing */
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* cubic-bezier(0.25, 0.46, 0.45, 0.94) — плавный ease-out-quad */
+.animate-page-enter {
+  animation: page-fade-in 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+/* Stagger: задержка + сохранение начального состояния до старта */
+.animate-stagger {
+  animation-fill-mode: both;
+}
+
+/* Плавные переходы для блоков и интерактивных элементов */
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Плавный блок — карточки, таблицы, контейнеры */
+.transition-block {
+  transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              background-color 0.3s ease;
+}

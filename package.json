@@ -1,0 +1,18 @@
+{
+  "name": "sewing-factory-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "db:migrate": "cd backend && npm run db:migrate",
+    "db:migrate:undo": "cd backend && npm run db:migrate:undo",
+    "db:seed": "cd backend && npm run db:seed",
+    "db:setup": "cd backend && npm run db:setup"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
