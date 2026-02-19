@@ -258,7 +258,7 @@ export default function FloorTasks() {
                           <div>
                             <button
                               onClick={() => navigate(`/orders/${task.order_id}`)}
-                              className="text-primary-500 hover:underline text-left"
+                              className="text-primary-400 hover:underline text-left"
                             >
                               #{task.order_id} {task.Order?.title}
                             </button>

@@ -12,6 +12,7 @@
   }
   html {
     color-scheme: light;
+    --color-primary-400: #9ca85a;
     --color-primary-500: #84934A;
     --color-primary-600: #656D3F;
     --color-primary-700: #492828;
@@ -24,6 +25,7 @@
   }
   html.dark {
     color-scheme: dark;
+    --color-primary-400: #40c9c5;
     --color-primary-500: #006A67;
     --color-primary-600: #003161;
     --color-primary-700: #000B58;
@@ -43,6 +45,19 @@ body {
   font-family: var(--app-font, system-ui, -apple-system, sans-serif);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+
+/* Скрыть нативную иконку календаря — используем свою */
+input[type="date"].planning-date-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+input[type="date"].planning-date-input::-moz-focus-inner {
+  border: 0;
 }
 
 /* Адаптив: таблицы с горизонтальным скроллом на мобильном */

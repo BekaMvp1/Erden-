@@ -2,7 +2,7 @@
  * API клиент для backend
  */
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://localhost:3001');
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '');
 
 function getToken() {
   return localStorage.getItem('token');
@@ -39,10 +39,6 @@ async function request(path, options = {}) {
 export const api = {
   dashboard: {
     summary: () => request('/api/dashboard/summary'),
-  },
-  executive: {
-    summary: () => request('/api/executive/summary'),
-    alerts: () => request('/api/executive/alerts'),
   },
   auth: {
     login: (email, password) =>
@@ -108,6 +104,26 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
+    calcCapacity: (data) =>
+      request('/api/planning/calc-capacity', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    applyCapacity: (data) =>
+      request('/api/planning/apply-capacity', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    flowCalc: (data) =>
+      request('/api/planning/flow/calc', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    flowApplyAuto: (data) =>
+      request('/api/planning/flow/apply-auto', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   orderOperations: {
     floorTasks: (floorId) =>
@@ -136,6 +152,30 @@ export const api = {
     monthly: (month) => request(`/api/reports/monthly?month=${month}`),
     planFact: (from, to) =>
       request(`/api/reports/plan-fact?from=${from}&to=${to}`),
+    v2: {
+      kpi: (params) =>
+        request(`/api/reports/v2/kpi?${new URLSearchParams(params)}`),
+      floors: (params) =>
+        request(`/api/reports/v2/floors?${new URLSearchParams(params)}`),
+      technologists: (params) =>
+        request(`/api/reports/v2/technologists?${new URLSearchParams(params)}`),
+      sewers: (params) =>
+        request(`/api/reports/v2/sewers?${new URLSearchParams(params)}`),
+      ordersLate: (params) =>
+        request(`/api/reports/v2/orders-late?${new URLSearchParams(params)}`),
+      planFact: (params) =>
+        request(`/api/reports/v2/plan-fact?${new URLSearchParams(params)}`),
+      exportCsv: async (params) => {
+        const q = new URLSearchParams(params).toString();
+        const token = localStorage.getItem('token');
+        const base = import.meta.env.VITE_API_URL || '';
+        const res = await fetch(`${base}/api/reports/v2/export.csv?${q}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(await res.text());
+        return res.blob();
+      },
+    },
   },
   settings: {
     deleteAllOrders: () =>
@@ -252,6 +292,13 @@ export const api = {
       }),
     clients: () => request('/api/references/clients'),
     operations: () => request('/api/references/operations'),
+    addOperation: (data) =>
+      request('/api/references/operations', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    deleteOperation: (id) =>
+      request(`/api/references/operations/${id}`, { method: 'DELETE' }),
     orderStatus: () => request('/api/references/order-status'),
     technologists: (floorId, all, buildingFloorId) =>
       request(

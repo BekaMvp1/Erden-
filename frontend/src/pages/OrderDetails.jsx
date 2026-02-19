@@ -620,7 +620,7 @@ export default function OrderDetails() {
                   </tr>
                   <tr className="border-b border-white/15 dark:border-white/15">
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Дедлайн</td>
-                    <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">{order.deadline}</td>
+                    <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text whitespace-nowrap">{order.deadline}</td>
                   </tr>
                   <tr className="border-b border-white/15 dark:border-white/15">
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Статус</td>
@@ -637,7 +637,7 @@ export default function OrderDetails() {
                   {order.completed_at && (
                     <tr className="border-b border-white/15 dark:border-white/15">
                       <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Завершён</td>
-                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">
+                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text whitespace-nowrap">
                         {new Date(order.completed_at).toLocaleString('ru-RU')}
                       </td>
                     </tr>
@@ -649,7 +649,7 @@ export default function OrderDetails() {
                   {(order.OrderFloorDistributions?.[0]?.created_at) && (
                     <tr className="border-b border-white/15 dark:border-white/15">
                       <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Дата распределения</td>
-                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">
+                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text whitespace-nowrap">
                         {new Date(order.OrderFloorDistributions[0].created_at).toLocaleString('ru-RU')}
                       </td>
                     </tr>
@@ -820,7 +820,7 @@ export default function OrderDetails() {
                               </svg>
                             </button>
                             <div>
-                              <span className="text-primary-500 font-medium">#{order.id}</span>
+                              <span className="text-primary-400 font-medium">#{order.id}</span>
                               <div className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80">{order.Client?.name}</div>
                             </div>
                           </div>
@@ -1017,7 +1017,7 @@ export default function OrderDetails() {
                         {done ? 'Выполнено' : 'Не выполнено'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">
+                    <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 whitespace-nowrap">
                       {op.planned_date || '—'}
                     </td>
                   </tr>

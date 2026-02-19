@@ -190,7 +190,7 @@ function ProcurementModal({ procurement, onClose, onUpdated }) {
               </select>
             </div>
           </div>
-          <div className="mt-2 text-lg font-semibold text-primary-500">Итого: {totalSum.toFixed(2)} ₽</div>
+          <div className="mt-2 text-lg font-semibold text-primary-400">Итого: {totalSum.toFixed(2)} ₽</div>
         </div>
 
         {/* Добавить закуп */}
@@ -368,7 +368,7 @@ export default function Procurement() {
                   className="border-b border-white/15 hover:bg-accent-2/30 dark:hover:bg-dark-800 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <span className="text-primary-500 font-medium">#{pr.order_id}</span>
+                    <span className="text-primary-400 font-medium">#{pr.order_id}</span>
                   </td>
                   <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{pr.Order?.Client?.name || '—'}</td>
                   <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{pr.Order?.title || '—'}</td>
@@ -382,7 +382,7 @@ export default function Procurement() {
                       {pr.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-medium text-primary-500">{getTotal(pr).toFixed(2)} ₽</td>
+                  <td className="px-4 py-3 font-medium text-primary-400">{getTotal(pr).toFixed(2)} ₽</td>
                 </tr>
               ))}
             </tbody>

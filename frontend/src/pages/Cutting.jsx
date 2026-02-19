@@ -383,7 +383,7 @@ export default function Cutting() {
                         </button>
                         <button
                           onClick={() => navigate(`/orders/${task.order_id}`)}
-                          className="text-primary-500 hover:underline"
+                          className="text-primary-400 hover:underline"
                         >
                           #{task.order_id} {task.Order?.Client?.name} — {task.Order?.title}
                         </button>

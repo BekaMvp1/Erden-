@@ -22,7 +22,7 @@ import Reports from "./pages/Reports";
 import References from "./pages/References";
 import Finance2026 from "./pages/Finance2026";
 import Settings from "./pages/Settings";
-import ExecutiveDashboard from "./pages/ExecutiveDashboard";
+import Dispatcher from "./pages/Dispatcher";
 
 export default function App() {
   return (
@@ -54,7 +54,7 @@ export default function App() {
                 <Route path="finance" element={<Finance2026 />} />
                 <Route path="references" element={<References />} />
                 <Route path="settings" element={<Settings />} />
-                <Route path="executive" element={<ExecutiveDashboard />} />
+                <Route path="dispatcher" element={<Dispatcher />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -53,7 +53,7 @@ export default function Login() {
         )}
       </button>
       <div className="w-full max-w-sm p-8 bg-accent-3/90 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 shadow-xl animate-page-enter">
-        <h1 className="text-2xl font-bold text-center text-primary-500 mb-6">
+        <h1 className="text-2xl font-bold text-center text-primary-400 mb-6">
           Швейная фабрика
         </h1>
         <form onSubmit={handleSubmit} className="space-y-4">

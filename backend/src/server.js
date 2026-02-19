@@ -36,8 +36,9 @@ async function start() {
     }
   }
 
-  app.listen(config.port, () => {
-    console.log(`Сервер запущен на порту ${config.port}`);
+  const port = process.env.PORT || config.port;
+  app.listen(port, () => {
+    console.log(`Сервер запущен на порту ${port}`);
   });
 }
 

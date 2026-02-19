@@ -17,6 +17,9 @@ if (!dbUrl) {
 const sequelize = new Sequelize(dbUrl, {
   dialect: 'postgres',
   logging: false,
+  ...(env === 'production' && dbConfig.dialectOptions && {
+    dialectOptions: dbConfig.dialectOptions,
+  }),
   define: {
     underscored: true,
     timestamps: true,

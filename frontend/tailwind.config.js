@@ -29,6 +29,7 @@ export default {
       },
       colors: {
         primary: {
+          400: 'var(--color-primary-400)',
           500: 'var(--color-primary-500)',
           600: 'var(--color-primary-600)',
           700: 'var(--color-primary-700)',

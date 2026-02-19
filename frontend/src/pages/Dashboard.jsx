@@ -156,7 +156,7 @@ export default function Dashboard() {
                   <td className="px-4 py-3">
                     <Link
                       to={`/orders/${order.id}`}
-                      className="text-primary-500 hover:underline"
+                      className="text-primary-400 hover:underline"
                     >
                       #{order.id}
                     </Link>
@@ -164,7 +164,7 @@ export default function Dashboard() {
                   <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text">{order.title}</td>
                   <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.Client?.name}</td>
                   <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.quantity}</td>
-                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.deadline}</td>
+                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 whitespace-nowrap">{order.deadline}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block px-2 py-1 rounded text-xs font-medium ${
@@ -181,7 +181,7 @@ export default function Dashboard() {
                         {canEdit && (
                           <Link
                             to={`/orders/${order.id}`}
-                            className="p-1.5 rounded text-primary-500 hover:bg-accent-1/30"
+                            className="p-1.5 rounded text-primary-400 hover:bg-accent-1/30"
                             title="Редактировать"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

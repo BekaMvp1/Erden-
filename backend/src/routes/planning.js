@@ -10,8 +10,13 @@ const express = require('express');
 const { Op } = require('sequelize');
 const db = require('../models');
 const { logAudit } = require('../utils/audit');
+const flowCalculatorController = require('../controllers/flowCalculatorController');
 
 const router = express.Router();
+
+// ========== Калькулятор параметров потока ==========
+router.post('/flow/calc', flowCalculatorController.calc);
+router.post('/flow/apply-auto', flowCalculatorController.applyAuto);
 
 // ========== Планирование по дням (таблица Excel) ==========
 
@@ -311,6 +316,233 @@ router.put('/day', async (req, res, next) => {
     }
 
     res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/planning/calc-capacity
+ * Расчёт плана по мощности: remaining, daily_capacity, working_days, total_capacity, percent, overload, days
+ */
+router.post('/calc-capacity', async (req, res, next) => {
+  try {
+    const { workshop_id, order_id, from, to, floor_id } = req.body;
+    if (!workshop_id || !order_id || !from || !to) {
+      return res.status(400).json({ error: 'Укажите workshop_id, order_id, from, to' });
+    }
+    if (from > to) {
+      return res.status(400).json({ error: 'Дата начала не может быть позже даты окончания' });
+    }
+
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+
+    const order = await db.Order.findByPk(order_id, {
+      include: [{ model: db.Client, as: 'Client' }],
+    });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (Number(order.workshop_id) !== Number(workshop_id)) {
+      return res.status(400).json({ error: 'Заказ не принадлежит выбранному цеху' });
+    }
+
+    let effectiveFloorId = null;
+    if (workshop.floors_count === 4) {
+      if (floor_id == null || floor_id === '' || floor_id === 'all') {
+        return res.status(400).json({ error: 'Для цеха «Наш цех» выберите этаж (1–4)' });
+      }
+      const fid = Number(floor_id);
+      if (fid < 1 || fid > 4) {
+        return res.status(400).json({ error: 'floor_id должен быть от 1 до 4' });
+      }
+      effectiveFloorId = fid;
+    }
+
+    // 1) total_quantity, actual_total, remaining
+    const totalQuantity = order.total_quantity ?? order.quantity ?? 0;
+    const actualRows = await db.sequelize.query(
+      `SELECT COALESCE(SUM(actual_qty), 0)::int as actual_total
+       FROM production_plan_day
+       WHERE order_id = :orderId AND (floor_id = :floorId OR (:floorId IS NULL AND floor_id IS NULL))`,
+      {
+        replacements: {
+          orderId: Number(order_id),
+          floorId: effectiveFloorId,
+        },
+        type: db.sequelize.QueryTypes.SELECT,
+      }
+    );
+    const actualTotal = actualRows[0]?.actual_total ?? 0;
+    const remaining = Math.max(0, totalQuantity - actualTotal);
+
+    // 2) daily_capacity, working_days, total_capacity
+    let dailyCapacity = 500; // по умолчанию для Аутсорс/Аксы
+    if (effectiveFloorId) {
+      const capRows = await db.sequelize.query(
+        `SELECT COALESCE(SUM(s.capacity_per_day), 0)::int as daily_capacity
+         FROM technologists t
+         JOIN sewers s ON s.technologist_id = t.id
+         WHERE t.building_floor_id = :floorId
+         GROUP BY t.building_floor_id`,
+        {
+          replacements: { floorId: effectiveFloorId },
+          type: db.sequelize.QueryTypes.SELECT,
+        }
+      );
+      dailyCapacity = capRows[0]?.daily_capacity ?? 500;
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    const dates = [];
+    let d = new Date(fromDate);
+    while (d <= toDate) {
+      dates.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+    const workingDays = dates.length;
+    const totalCapacity = dailyCapacity * workingDays;
+
+    // 3) overload, percent
+    const percent = totalCapacity > 0 ? Math.round((remaining / totalCapacity) * 100) : 0;
+    const overload = remaining > totalCapacity;
+
+    // 4) days — распределение по дням
+    let days = [];
+    if (!overload && workingDays > 0) {
+      if (remaining > 0) {
+        const base = Math.floor(remaining / workingDays);
+        const rest = remaining % workingDays;
+        days = dates.map((date, i) => {
+          let plannedQty = base;
+          if (i < rest) plannedQty += 1;
+          plannedQty = Math.min(plannedQty, dailyCapacity);
+          return { date, planned_qty: plannedQty };
+        });
+      } else {
+        days = dates.map((date) => ({ date, planned_qty: 0 }));
+      }
+    }
+
+    res.json({
+      total_quantity: totalQuantity,
+      actual_total: actualTotal,
+      remaining,
+      daily_capacity: dailyCapacity,
+      working_days: workingDays,
+      total_capacity: totalCapacity,
+      percent,
+      overload,
+      days,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/planning/apply-capacity
+ * Применение рассчитанного плана. Только admin/manager или technologist для своего этажа.
+ */
+router.post('/apply-capacity', async (req, res, next) => {
+  try {
+    if (req.user.role === 'operator') {
+      return res.status(403).json({ error: 'Оператор не может применять план' });
+    }
+
+    const { order_id, workshop_id, floor_id, days } = req.body;
+    if (!order_id || !workshop_id || !Array.isArray(days) || days.length === 0) {
+      return res.status(400).json({ error: 'Укажите order_id, workshop_id и массив days' });
+    }
+
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+
+    let effectiveFloorId = null;
+    if (workshop.floors_count === 4) {
+      if (floor_id == null || floor_id === '' || floor_id === 'all') {
+        return res.status(400).json({ error: 'Для цеха «Наш цех» укажите floor_id (1–4)' });
+      }
+      const fid = Number(floor_id);
+      if (fid < 1 || fid > 4) {
+        return res.status(400).json({ error: 'floor_id должен быть от 1 до 4' });
+      }
+      effectiveFloorId = fid;
+
+      // Технолог — только для своего этажа
+      if (req.user.role === 'technologist') {
+        const allowed = req.allowedBuildingFloorId ?? req.allowedFloorId;
+        if (allowed != null && Number(allowed) !== fid) {
+          return res.status(403).json({ error: 'Технолог может применять план только для своего этажа' });
+        }
+      }
+    }
+
+    const order = await db.Order.findByPk(order_id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (Number(order.workshop_id) !== Number(workshop_id)) {
+      return res.status(400).json({ error: 'Заказ не принадлежит выбранному цеху' });
+    }
+
+    const dateRange = days.reduce(
+      (acc, d) => {
+        const dt = String(d.date || d).slice(0, 10);
+        if (!acc[0] || dt < acc[0]) acc[0] = dt;
+        if (!acc[1] || dt > acc[1]) acc[1] = dt;
+        return acc;
+      },
+      [null, null]
+    );
+
+    const t = await db.sequelize.transaction();
+    try {
+      const existingRows = await db.ProductionPlanDay.findAll({
+        where: {
+          order_id: Number(order_id),
+          workshop_id: Number(workshop_id),
+          floor_id: effectiveFloorId,
+          date: { [Op.between]: [dateRange[0], dateRange[1]] },
+        },
+        transaction: t,
+      });
+      const actualByDate = (existingRows || []).reduce((acc, r) => {
+        acc[r.date] = r.actual_qty || 0;
+        return acc;
+      }, {});
+
+      await db.ProductionPlanDay.destroy({
+        where: {
+          order_id: Number(order_id),
+          workshop_id: Number(workshop_id),
+          floor_id: effectiveFloorId,
+          date: { [Op.between]: [dateRange[0], dateRange[1]] },
+        },
+        transaction: t,
+      });
+
+      for (const d of days) {
+        const date = String(d.date || d).slice(0, 10);
+        const plannedQty = Math.max(0, parseInt(d.planned_qty, 10) || 0);
+        const actualQty = actualByDate[date] ?? 0;
+        await db.ProductionPlanDay.create(
+          {
+            order_id: Number(order_id),
+            workshop_id: Number(workshop_id),
+            floor_id: effectiveFloorId,
+            date,
+            planned_qty: plannedQty,
+            actual_qty: actualQty,
+          },
+          { transaction: t }
+        );
+      }
+
+      await t.commit();
+      res.json({ ok: true, message: 'План применён' });
+    } catch (err) {
+      await t.rollback();
+      throw err;
+    }
   } catch (err) {
     next(err);
   }

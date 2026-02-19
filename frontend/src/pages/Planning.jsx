@@ -7,7 +7,8 @@
  * Переключатель [Неделя | Месяц], режим сохраняется в localStorage.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
 
@@ -71,6 +72,10 @@ function getDateRangeForMode(mode, refDate = new Date()) {
 }
 
 export default function Planning() {
+  const [searchParams] = useSearchParams();
+  const urlInitDone = useRef(false);
+  const skipResetFromUrl = useRef(false);
+
   const [workshops, setWorkshops] = useState([]);
   const [workshopId, setWorkshopId] = useState('');
   const [selectedWorkshop, setSelectedWorkshop] = useState(null);
@@ -105,13 +110,57 @@ export default function Planning() {
   const [editModal, setEditModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  // Расчёт по мощности
+  const [calcResult, setCalcResult] = useState(null);
+  const [calcLoading, setCalcLoading] = useState(false);
+  const [applyLoading, setApplyLoading] = useState(false);
+
+  // Параметры потока (калькулятор)
+  const [flowOpen, setFlowOpen] = useState(false);
+  const [flowForm, setFlowForm] = useState({
+    shift_hours: 8,
+    product_type: 'dress',
+    mode: 'BY_SHIFT_CAPACITY',
+    Msm: '',
+    Np: '',
+    Kr: '',
+    Su: '',
+    T: '',
+    M: '',
+    operation_time_sec: '',
+    planned_total_ui: '',
+  });
+  const [flowResult, setFlowResult] = useState(null);
+  const [flowLoading, setFlowLoading] = useState(false);
+  const [flowApplyLoading, setFlowApplyLoading] = useState(false);
+  const [flowApplySuccess, setFlowApplySuccess] = useState(false);
+
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const canEdit = ['admin', 'manager', 'technologist'].includes(user.role);
+  const canApply = ['admin', 'manager', 'technologist'].includes(user.role);
 
   // Шаг 1: цехи
   useEffect(() => {
     api.workshops.list().then(setWorkshops).catch(() => setWorkshops([]));
   }, []);
+
+  // Инициализация из URL (переход из Отчётов)
+  useEffect(() => {
+    if (urlInitDone.current || workshops.length === 0) return;
+    const wid = searchParams.get('workshop_id');
+    const fromParam = searchParams.get('from');
+    const toParam = searchParams.get('to');
+    const fid = searchParams.get('floor_id') ?? '';
+    const oid = searchParams.get('order_id') ?? '';
+    if (!wid || !workshops.some((x) => String(x.id) === wid)) return;
+    urlInitDone.current = true;
+    skipResetFromUrl.current = true;
+    setWorkshopId(wid);
+    if (fromParam) setFrom(fromParam);
+    if (toParam) setTo(toParam);
+    if (fid) setFloorId(fid);
+    if (oid) setOrderId(oid);
+  }, [workshops, searchParams]);
 
   // Шаг 2: модели по цеху
   useEffect(() => {
@@ -129,12 +178,17 @@ export default function Planning() {
       .then(setModels)
       .catch(() => setModels([]))
       .finally(() => setModelsLoading(false));
-    setOrderId('');
-    setFrom('');
-    setTo('');
-    setFloors([]);
-    setFloorId('');
+    if (!skipResetFromUrl.current) {
+      setOrderId('');
+      setFrom('');
+      setTo('');
+      setFloors([]);
+      setFloorId('');
+    } else {
+      skipResetFromUrl.current = false;
+    }
     setData(null);
+    setCalcResult(null);
   }, [workshopId, workshops]);
 
   // Автоподстановка дат после выбора модели: если даты пустые — текущая неделя/месяц
@@ -165,7 +219,7 @@ export default function Planning() {
   useEffect(() => {
     if (!workshopId || !selectedWorkshop || selectedWorkshop.floors_count <= 1) {
       setFloors([]);
-      setFloorId('');
+      if (!urlInitDone.current) setFloorId('');
       return;
     }
     setFloorsLoading(true);
@@ -174,13 +228,19 @@ export default function Planning() {
       .then((f) => {
         const list = f || [];
         setFloors(list);
-        const saved = localStorage.getItem(FLOOR_STORAGE_KEY);
-        const defaultId = saved && list.some((x) => String(x.id) === saved) ? saved : (list[1]?.id ?? list[0]?.id ?? '');
-        setFloorId(String(defaultId));
+        const fidFromUrl = searchParams.get('floor_id');
+        const keepFromUrl = urlInitDone.current && fidFromUrl && list.some((x) => String(x.id) === fidFromUrl);
+        if (keepFromUrl) {
+          setFloorId(String(fidFromUrl));
+        } else {
+          const saved = localStorage.getItem(FLOOR_STORAGE_KEY);
+          const defaultId = saved && list.some((x) => String(x.id) === saved) ? saved : (list[1]?.id ?? list[0]?.id ?? '');
+          setFloorId(String(defaultId));
+        }
       })
       .catch(() => setFloors([]))
       .finally(() => setFloorsLoading(false));
-  }, [workshopId, selectedWorkshop]);
+  }, [workshopId, selectedWorkshop, searchParams]);
 
   const handleFloorChange = (val) => {
     setFloorId(val);
@@ -231,6 +291,133 @@ export default function Planning() {
       .finally(() => setTableLoading(false));
   }, [canLoadTable, workshopId, orderId, from, to, floorId, selectedWorkshop?.floors_count]);
 
+  // Сброс результата расчёта при смене фильтров
+  useEffect(() => {
+    setCalcResult(null);
+  }, [orderId, from, to, floorId]);
+
+  const handleCalcCapacity = async () => {
+    if (!canLoadTable) return;
+    setCalcLoading(true);
+    setErrorMsg('');
+    setCalcResult(null);
+    try {
+      const params = {
+        workshop_id: Number(workshopId),
+        order_id: Number(orderId),
+        from,
+        to,
+      };
+      if (selectedWorkshop?.floors_count > 1) {
+        params.floor_id = Number(floorId);
+      }
+      const result = await api.planning.calcCapacity(params);
+      setCalcResult(result);
+    } catch (err) {
+      setErrorMsg(err.message || 'Ошибка расчёта');
+    } finally {
+      setCalcLoading(false);
+    }
+  };
+
+  const handleApplyCapacity = async () => {
+    if (!calcResult || calcResult.overload || !canApply) return;
+    setApplyLoading(true);
+    setErrorMsg('');
+    try {
+      await api.planning.applyCapacity({
+        order_id: Number(orderId),
+        workshop_id: Number(workshopId),
+        floor_id: selectedWorkshop?.floors_count > 1 ? Number(floorId) : null,
+        days: calcResult.days,
+      });
+      setCalcResult(null);
+      if (canLoadTable) {
+        const params = { workshop_id: workshopId, order_id: orderId, from, to };
+        if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
+        api.planning.modelTable(params).then(setData).catch(() => setData(null));
+      }
+    } catch (err) {
+      setErrorMsg(err.message || 'Ошибка применения плана');
+    } finally {
+      setApplyLoading(false);
+    }
+  };
+
+  const handleFlowCalc = async () => {
+    setFlowLoading(true);
+    setFlowResult(null);
+    setErrorMsg('');
+    try {
+      const body = {
+        workshop_id: workshopId ? Number(workshopId) : undefined,
+        floor_id: selectedWorkshop?.floors_count > 1 && floorId ? Number(floorId) : null,
+        from,
+        to,
+        order_id: orderId ? Number(orderId) : undefined,
+        shift_hours: flowForm.shift_hours || 8,
+        product_type: flowForm.product_type || 'dress',
+        mode: flowForm.mode,
+        planned_total_ui: flowForm.planned_total_ui || undefined,
+      };
+      if (flowForm.Msm) body.Msm = parseFloat(flowForm.Msm);
+      if (flowForm.Np) body.Np = parseFloat(flowForm.Np);
+      if (flowForm.Kr) body.Kr = parseFloat(flowForm.Kr);
+      if (flowForm.Su) body.Su = parseFloat(flowForm.Su);
+      if (flowForm.T) body.T = parseFloat(flowForm.T);
+      if (flowForm.M) body.M = parseFloat(flowForm.M);
+      if (flowForm.operation_time_sec) body.operation_time_sec = parseFloat(flowForm.operation_time_sec);
+      const result = await api.planning.flowCalc(body);
+      setFlowResult(result);
+    } catch (err) {
+      setErrorMsg(err.message || 'Ошибка расчёта');
+    } finally {
+      setFlowLoading(false);
+    }
+  };
+
+  /** Распределить и применить план по мощности (flow/apply-auto) */
+  const handleFlowApplyAuto = async () => {
+    if (!flowResult?.capacity_ok || !canApply || !canLoadTable) return;
+    const plannedTotal = flowResult.planned_total_in_period ?? 0;
+    if (plannedTotal <= 0) return;
+    setFlowApplyLoading(true);
+    setErrorMsg('');
+    setFlowApplySuccess(false);
+    try {
+      const body = {
+        workshop_id: Number(workshopId),
+        order_id: Number(orderId),
+        floor_id: selectedWorkshop?.floors_count > 1 && floorId ? Number(floorId) : null,
+        from,
+        to,
+        planned_total: plannedTotal,
+        shift_hours: flowForm.shift_hours || 8,
+        mode: flowForm.mode,
+        product_type: flowForm.product_type || 'dress',
+      };
+      if (flowForm.Msm) body.Msm = parseFloat(flowForm.Msm);
+      if (flowForm.Np) body.Np = parseFloat(flowForm.Np);
+      if (flowForm.Kr) body.Kr = parseFloat(flowForm.Kr);
+      if (flowForm.Su) body.Su = parseFloat(flowForm.Su);
+      if (flowForm.T) body.T = parseFloat(flowForm.T);
+      if (flowForm.M) body.M = parseFloat(flowForm.M);
+      await api.planning.flowApplyAuto(body);
+      setFlowApplySuccess(true);
+      setTimeout(() => setFlowApplySuccess(false), 3000);
+      // Обновить таблицу планирования
+      const params = { workshop_id: workshopId, order_id: orderId, from, to };
+      if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
+      api.planning.modelTable(params).then(setData).catch(() => setData(null));
+      // Пересчитать flow для обновления % загрузки
+      handleFlowCalc();
+    } catch (err) {
+      setErrorMsg(err.message || 'Ошибка применения плана');
+    } finally {
+      setFlowApplyLoading(false);
+    }
+  };
+
   const handleSaveDay = async () => {
     if (!editModal || !workshopId) return;
     setSaving(true);
@@ -261,18 +448,26 @@ export default function Planning() {
   const floor1Selected = showFloorStep && Number(floorId) === 1;
 
   const selectClass = (disabled) =>
-    `px-4 py-2 rounded-lg border text-[#ECECEC] dark:text-dark-text ${
+    `px-4 py-2 rounded-lg border ${
       disabled
-        ? 'bg-accent-2/40 dark:bg-dark-800/50 border-white/15 cursor-not-allowed opacity-60'
-        : 'bg-accent-2/80 dark:bg-dark-800 border-white/25 dark:border-white/25'
-    }`;
+        ? 'bg-accent-2/70 dark:bg-dark-800/80 border-white/20 cursor-not-allowed text-[#ECECEC]/80'
+        : 'bg-accent-2/80 dark:bg-dark-800 border-white/25 dark:border-white/25 text-[#ECECEC]'
+    } dark:text-dark-text`;
 
   const inputClass = (disabled) =>
     `px-3 py-2 rounded-lg border ${
       disabled
-        ? 'bg-accent-2/40 dark:bg-dark-800/50 border-white/15 cursor-not-allowed opacity-60'
+        ? 'bg-accent-2/70 dark:bg-dark-800/80 border-white/20 cursor-not-allowed'
         : 'bg-accent-2/80 dark:bg-dark-800 border-white/25 dark:border-white/25'
-    } text-[#ECECEC] dark:text-dark-text`;
+    } ${disabled ? 'text-[#ECECEC]/70' : 'text-[#ECECEC]'} dark:text-dark-text`;
+
+  const fromDateRef = useRef(null);
+  const toDateRef = useRef(null);
+  const openDatePicker = (ref) => {
+    if (!ref?.current || !orderId) return;
+    ref.current.focus();
+    ref.current.showPicker?.();
+  };
 
   return (
     <div>
@@ -323,7 +518,7 @@ export default function Planning() {
 
           {/* Шаг 3: Период и даты */}
           <div
-            className={`sm:col-span-2 lg:col-span-1 transition-all duration-300 ${
+            className={`sm:col-span-2 lg:col-span-1 lg:mr-2 transition-all duration-300 ${
               datesAutoFilled ? 'ring-2 ring-primary-500/30 rounded-lg ring-offset-2 ring-offset-transparent p-1 -m-1' : ''
             }`}
           >
@@ -357,28 +552,64 @@ export default function Planning() {
               </div>
               <div className="flex gap-2 flex-1 min-w-0">
                 <input
+                  ref={fromDateRef}
                   type="date"
                   value={from}
                   onChange={(e) => setFrom(e.target.value)}
                   disabled={!orderId}
-                  placeholder="от"
-                  className={`${inputClass(!orderId)} flex-1 min-w-0`}
+                  className="sr-only planning-date-input"
+                  style={{ colorScheme: 'dark' }}
+                  aria-label="Дата начала"
                 />
+                <button
+                  type="button"
+                  onClick={() => openDatePicker(fromDateRef)}
+                  disabled={!orderId}
+                  title={from ? `от ${from}` : 'Выберите дату начала'}
+                  className={`p-2.5 rounded-lg border flex items-center justify-center flex-shrink-0 ${
+                    !orderId
+                      ? 'bg-accent-2/70 border-white/20 cursor-not-allowed opacity-50'
+                      : 'bg-accent-2/80 border-white/25 text-[#ECECEC] hover:text-white hover:bg-accent-2'
+                  }`}
+                  aria-label="Календарь — дата начала"
+                >
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
                 <input
+                  ref={toDateRef}
                   type="date"
                   value={to}
                   onChange={(e) => setTo(e.target.value)}
                   disabled={!orderId}
-                  placeholder="до"
-                  className={`${inputClass(!orderId)} flex-1 min-w-0`}
+                  className="sr-only planning-date-input"
+                  style={{ colorScheme: 'dark' }}
+                  aria-label="Дата окончания"
                 />
+                <button
+                  type="button"
+                  onClick={() => openDatePicker(toDateRef)}
+                  disabled={!orderId}
+                  title={to ? `до ${to}` : 'Выберите дату окончания'}
+                  className={`p-2.5 rounded-lg border flex items-center justify-center flex-shrink-0 ${
+                    !orderId
+                      ? 'bg-accent-2/70 border-white/20 cursor-not-allowed opacity-50'
+                      : 'bg-accent-2/80 border-white/25 text-[#ECECEC] hover:text-white hover:bg-accent-2'
+                  }`}
+                  aria-label="Календарь — дата окончания"
+                >
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
 
           {/* Шаг 4: Этаж (только для Наш цех) */}
           {showFloorStep && (
-            <div>
+            <div className="max-w-[200px] lg:ml-4">
               <label className="block text-sm font-medium text-[#ECECEC] dark:text-dark-text/90 mb-1">4. Этаж</label>
               <select
                 value={floorId}
@@ -411,7 +642,360 @@ export default function Planning() {
             {FLOOR_1_HINT}
           </div>
         )}
+
+        {/* Блок «Параметры потока» — collapsible */}
+        <div className="no-print mt-6">
+          <button
+            type="button"
+            onClick={() => setFlowOpen(!flowOpen)}
+            className="flex items-center gap-2 w-full text-left px-4 py-3 rounded-xl bg-accent-3/80 dark:bg-dark-900 border border-white/25 hover:bg-accent-3 dark:hover:bg-dark-800 transition-colors"
+          >
+            <svg className={`w-5 h-5 transition-transform ${flowOpen ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium text-[#ECECEC] dark:text-dark-text">Параметры потока (расчёт)</span>
+          </button>
+          {flowOpen && (
+            <div className="mt-2 p-4 rounded-xl bg-accent-3/80 dark:bg-dark-900 border border-white/25 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Длительность смены (ч)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={flowForm.shift_hours}
+                    onChange={(e) => setFlowForm({ ...flowForm, shift_hours: e.target.value || 8 })}
+                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Тип изделия</label>
+                  <select
+                    value={flowForm.product_type}
+                    onChange={(e) => setFlowForm({ ...flowForm, product_type: e.target.value })}
+                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                  >
+                    <option value="dress">Платье</option>
+                    <option value="coat">Пальто</option>
+                    <option value="suit">Костюм</option>
+                    <option value="underwear">Бельё</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Режим расчёта</label>
+                  <select
+                    value={flowForm.mode}
+                    onChange={(e) => setFlowForm({ ...flowForm, mode: e.target.value })}
+                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                  >
+                    <option value="BY_SHIFT_CAPACITY">По мощности смены (Mсм)</option>
+                    <option value="BY_WORKERS">По числу рабочих (Np)</option>
+                    <option value="BY_WORKPLACES">По рабочим местам (Kr)</option>
+                    <option value="BY_AREA">По площади (Su)</option>
+                    <option value="BY_T_AND_M">По T и M (трудоёмкость и выпуск)</option>
+                  </select>
+                </div>
+              </div>
+              {/* Динамические поля по режиму */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {flowForm.mode === 'BY_SHIFT_CAPACITY' && (
+                  <div>
+                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Mсм (ед/смена)</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={flowForm.Msm}
+                      onChange={(e) => setFlowForm({ ...flowForm, Msm: e.target.value })}
+                      placeholder="Мощность смены"
+                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                    />
+                  </div>
+                )}
+                {flowForm.mode === 'BY_WORKERS' && (
+                  <>
+                    <div>
+                      <label className="block text-sm text-[#ECECEC]/80 mb-1">T — трудоёмкость (сек)</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        value={flowForm.T}
+                        onChange={(e) => setFlowForm({ ...flowForm, T: e.target.value })}
+                        placeholder="Трудоёмкость"
+                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-[#ECECEC]/80 mb-1">Np — число рабочих</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={flowForm.Np}
+                        onChange={(e) => setFlowForm({ ...flowForm, Np: e.target.value })}
+                        placeholder="Количество рабочих"
+                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                      />
+                    </div>
+                  </>
+                )}
+                {flowForm.mode === 'BY_WORKPLACES' && (
+                  <div>
+                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Kr — рабочие места</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={flowForm.Kr}
+                      onChange={(e) => setFlowForm({ ...flowForm, Kr: e.target.value })}
+                      placeholder="Количество рабочих мест"
+                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                    />
+                  </div>
+                )}
+                {flowForm.mode === 'BY_AREA' && (
+                  <div>
+                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Su — площадь (м²)</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={flowForm.Su}
+                      onChange={(e) => setFlowForm({ ...flowForm, Su: e.target.value })}
+                      placeholder="Площадь"
+                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                    />
+                  </div>
+                )}
+                {flowForm.mode === 'BY_T_AND_M' && (
+                  <>
+                    <div>
+                      <label className="block text-sm text-[#ECECEC]/80 mb-1">T — трудоёмкость (сек)</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        value={flowForm.T}
+                        onChange={(e) => setFlowForm({ ...flowForm, T: e.target.value })}
+                        placeholder="Трудоёмкость"
+                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-[#ECECEC]/80 mb-1">M — сменный выпуск (ед/смена)</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        value={flowForm.M}
+                        onChange={(e) => setFlowForm({ ...flowForm, M: e.target.value })}
+                        placeholder="Выпуск за смену"
+                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                      />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="block text-sm text-[#ECECEC]/80 mb-1">t_op — время операции (сек) — для Нв</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={flowForm.operation_time_sec}
+                    onChange={(e) => setFlowForm({ ...flowForm, operation_time_sec: e.target.value })}
+                    placeholder="Опционально"
+                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-[#ECECEC]/80 mb-1">План на период (если не из БД)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={flowForm.planned_total_ui}
+                    onChange={(e) => setFlowForm({ ...flowForm, planned_total_ui: e.target.value })}
+                    placeholder="Опционально"
+                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleFlowCalc}
+                disabled={flowLoading || !flowForm.mode}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {flowLoading ? 'Расчёт...' : 'Рассчитать'}
+              </button>
+              {flowResult && (
+                <div className="mt-4 pt-4 border-t border-white/20 space-y-3">
+                  <h4 className="font-medium text-[#ECECEC] dark:text-dark-text">Результаты</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                    {flowResult.t_sec != null && (
+                      <div>
+                        <span className="text-[#ECECEC]/60">Такт t</span>
+                        <p className="font-medium">{flowResult.t_sec} сек</p>
+                      </div>
+                    )}
+                    {flowResult.Np_calc != null && (
+                      <div>
+                        <span className="text-[#ECECEC]/60">Рабочие Np</span>
+                        <p className="font-medium">{flowResult.Np_calc}</p>
+                      </div>
+                    )}
+                    {flowResult.Kr_calc != null && (
+                      <div>
+                        <span className="text-[#ECECEC]/60">Рабочие места Kr</span>
+                        <p className="font-medium">{flowResult.Kr_calc}</p>
+                      </div>
+                    )}
+                    {flowResult.Nv_per_shift != null && (
+                      <div>
+                        <span className="text-[#ECECEC]/60">Норма выработки Нв</span>
+                        <p className="font-medium">{flowResult.Nv_per_shift} ед/смена</p>
+                      </div>
+                    )}
+                  </div>
+                  {flowResult.period_days != null && flowResult.period_days > 0 && (
+                    <div className="mt-3 space-y-3">
+                      <div className={`p-3 rounded-lg ${flowResult.capacity_ok ? 'bg-accent-2/50 dark:bg-dark-800/50' : 'bg-red-500/20 border border-red-500/50'}`}>
+                        <h5 className="text-sm font-medium text-[#ECECEC] mb-2">Проверка мощности на период</h5>
+                        <p className="text-sm"><span className="text-[#ECECEC]/70">План на период:</span> {flowResult.planned_total_in_period}</p>
+                        <p className="text-sm"><span className="text-[#ECECEC]/70">Мощность на период:</span> {flowResult.capacity_total_in_period}</p>
+                        <p className="text-sm"><span className="text-[#ECECEC]/70">Загрузка:</span> {flowResult.capacity_percent}%</p>
+                        <p className={`text-sm font-medium mt-1 ${flowResult.capacity_ok ? 'text-green-400' : 'text-red-400'}`}>
+                          {flowResult.capacity_ok ? 'Хватает' : 'Не хватает'}
+                        </p>
+                        {!flowResult.capacity_ok && (
+                          <p className="text-sm text-red-400 mt-2">
+                            Перегруз: план ({flowResult.planned_total_in_period}) превышает мощность периода ({flowResult.capacity_total_in_period}). Увеличьте период или уменьшите объём.
+                          </p>
+                        )}
+                      </div>
+                      {flowResult.capacity_ok && canApply && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={handleFlowApplyAuto}
+                            disabled={flowApplyLoading}
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                          >
+                            {flowApplyLoading ? 'Применение...' : 'Распределить и применить по мощности'}
+                          </button>
+                          {flowApplySuccess && (
+                            <span className="text-sm text-green-400">План успешно применён</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {flowResult.notes?.length > 0 && (
+                    <ul className="text-sm text-[#ECECEC]/80 space-y-1">
+                      {flowResult.notes.map((n, i) => (
+                        <li key={i}>{n}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Кнопка расчёта по мощности */}
+        {canLoadTable && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleCalcCapacity}
+              disabled={calcLoading}
+              className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+            >
+              {calcLoading ? 'Расчёт...' : 'Рассчитать автоматически'}
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Информационный блок после расчёта */}
+      {calcResult && (
+        <div className="no-print mb-6 space-y-4">
+          <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
+            <h3 className="text-sm font-semibold text-[#ECECEC] dark:text-dark-text mb-3">Расчёт по мощности</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <div>
+                <span className="text-[#ECECEC]/60">Общее количество заказа</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.total_quantity}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">Уже выполнено</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.actual_total}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">Остаток</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.remaining}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">Дневная мощность этажа</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.daily_capacity}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">Количество дней</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.working_days}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">Общая мощность периода</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.total_capacity}</p>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/60">% загрузки</span>
+                <p className={`font-medium ${calcResult.overload ? 'text-red-400' : 'text-[#ECECEC]'}`}>
+                  {calcResult.percent}%
+                </p>
+              </div>
+            </div>
+
+            {calcResult.overload && (
+              <div className="mt-4 px-4 py-3 rounded-lg bg-red-500/20 border border-red-500 text-red-400 text-sm">
+                Перегруз: остаток ({calcResult.remaining}) превышает мощность периода ({calcResult.total_capacity}).
+                Увеличьте период или уменьшите объём.
+              </div>
+            )}
+
+            {!calcResult.overload && calcResult.days?.length > 0 && (
+              <>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[300px]">
+                    <thead>
+                      <tr className="border-b border-white/20">
+                        <th className="text-left px-4 py-2 text-sm font-medium text-[#ECECEC]/90">Дата</th>
+                        <th className="text-right px-4 py-2 text-sm font-medium text-[#ECECEC]/90">Предложенный план</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calcResult.days.map((d) => (
+                        <tr key={d.date} className="border-b border-white/10">
+                          <td className="px-4 py-2 text-[#ECECEC]/90 whitespace-nowrap">{d.date}</td>
+                          <td className="px-4 py-2 text-right text-[#ECECEC]/90">{d.planned_qty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {canApply && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={handleApplyCapacity}
+                      disabled={applyLoading}
+                      className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                    >
+                      {applyLoading ? 'Применение...' : 'Применить план'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {errorMsg && (
         <div className="mb-4 px-4 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm">{errorMsg}</div>

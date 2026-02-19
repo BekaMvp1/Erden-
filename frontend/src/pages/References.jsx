@@ -24,6 +24,9 @@ export default function References() {
   const [addingBuildingFloor, setAddingBuildingFloor] = useState(false);
   const [newCuttingTypeName, setNewCuttingTypeName] = useState('');
   const [addingCuttingType, setAddingCuttingType] = useState(false);
+  const [newOperation, setNewOperation] = useState({ name: '', norm_minutes: '', category: 'SEWING', default_floor_id: '', locked_to_floor: false });
+  const [addingOperation, setAddingOperation] = useState(false);
+  const [deletingOperationId, setDeletingOperationId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -53,7 +56,7 @@ export default function References() {
     if (tab === 'technologists' || tab === 'sewers') {
       api.references.floors().then(setFloors).catch(() => setFloors([]));
     }
-    if (tab === 'technologists') {
+    if (tab === 'technologists' || tab === 'operations') {
       api.references.buildingFloors().then(setBuildingFloors).catch(() => setBuildingFloors([]));
     }
   }, [tab]);
@@ -95,6 +98,49 @@ export default function References() {
       alert(err.message);
     } finally {
       setAddingCuttingType(false);
+    }
+  };
+
+  const handleAddOperation = async (e) => {
+    e.preventDefault();
+    const name = newOperation.name.trim();
+    if (!name) {
+      alert('Укажите название операции');
+      return;
+    }
+    const norm = parseFloat(newOperation.norm_minutes);
+    if (isNaN(norm) || norm < 0) {
+      alert('Укажите норму времени (минуты, число ≥ 0)');
+      return;
+    }
+    setAddingOperation(true);
+    try {
+      await api.references.addOperation({
+        name,
+        norm_minutes: norm,
+        category: newOperation.category || 'SEWING',
+        default_floor_id: newOperation.default_floor_id || null,
+        locked_to_floor: newOperation.locked_to_floor,
+      });
+      setNewOperation({ name: '', norm_minutes: '', category: 'SEWING', default_floor_id: '', locked_to_floor: false });
+      load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setAddingOperation(false);
+    }
+  };
+
+  const handleDeleteOperation = async (id) => {
+    if (!window.confirm('Удалить операцию?')) return;
+    setDeletingOperationId(id);
+    try {
+      await api.references.deleteOperation(id);
+      load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDeletingOperationId(null);
     }
   };
 
@@ -157,6 +203,7 @@ export default function References() {
     if (typeof v !== 'object') return String(v);
     if (k === 'User' && v?.name) return v.name;
     if (k === 'Floor' && v?.name) return v.name;
+    if (k === 'BuildingFloor' && v?.name) return v.name;
     if (k === 'Technologist') {
       if (v?.User?.name && v?.Floor?.name) return `${v.User.name} (${v.Floor.name})`;
       if (v?.User?.name) return v.User.name;
@@ -171,6 +218,31 @@ export default function References() {
         { key: 'id', label: 'ID' },
         { key: 'name', label: 'Название' },
         { key: 'is_active', label: 'Активен', getValue: (row) => (row.is_active ? 'Да' : 'Нет') },
+      ];
+    }
+    if (tab === 'operations' && data.length > 0) {
+      return [
+        { key: 'id', label: 'ID' },
+        { key: 'name', label: 'Название' },
+        { key: 'norm_minutes', label: 'Норма (мин)' },
+        { key: 'category', label: 'Категория', getValue: (row) => ({ CUTTING: 'Раскрой', SEWING: 'Пошив', FINISH: 'Финиш' }[row.category] || row.category) },
+        { key: 'BuildingFloor', label: 'Этаж по умолчанию' },
+        { key: 'locked_to_floor', label: 'Привязан к этажу', getValue: (row) => (row.locked_to_floor ? 'Да' : 'Нет') },
+        {
+          key: '_actions',
+          label: '',
+          getValue: (row) =>
+            ['admin', 'manager'].includes(user?.role) ? (
+              <button
+                type="button"
+                onClick={() => handleDeleteOperation(row.id)}
+                disabled={deletingOperationId === row.id}
+                className="px-2 py-1 text-sm rounded bg-red-600/80 hover:bg-red-600 text-white disabled:opacity-50"
+              >
+                {deletingOperationId === row.id ? '...' : 'Удалить'}
+              </button>
+            ) : null,
+        },
       ];
     }
     if (tab === 'technologists' && data.length > 0) {
@@ -372,6 +444,62 @@ export default function References() {
             className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
           >
             {addingSewer ? 'Добавление...' : 'Добавить'}
+          </button>
+        </form>
+      )}
+
+      {tab === 'operations' && ['admin', 'manager'].includes(user?.role) && (
+        <form onSubmit={handleAddOperation} className="mb-4 flex flex-wrap gap-2 items-end">
+          <input
+            type="text"
+            value={newOperation.name}
+            onChange={(e) => setNewOperation({ ...newOperation, name: e.target.value })}
+            placeholder="Название операции"
+            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[180px]"
+          />
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={newOperation.norm_minutes}
+            onChange={(e) => setNewOperation({ ...newOperation, norm_minutes: e.target.value })}
+            placeholder="Норма (мин)"
+            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[100px]"
+          />
+          <select
+            value={newOperation.category}
+            onChange={(e) => setNewOperation({ ...newOperation, category: e.target.value })}
+            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[140px]"
+          >
+            <option value="CUTTING">Раскрой</option>
+            <option value="SEWING">Пошив</option>
+            <option value="FINISH">Финиш</option>
+          </select>
+          <select
+            value={newOperation.default_floor_id}
+            onChange={(e) => setNewOperation({ ...newOperation, default_floor_id: e.target.value })}
+            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[140px]"
+          >
+            <option value="">Этаж по умолчанию</option>
+            {buildingFloors.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 text-[#ECECEC] dark:text-dark-text cursor-pointer">
+            <input
+              type="checkbox"
+              checked={newOperation.locked_to_floor}
+              onChange={(e) => setNewOperation({ ...newOperation, locked_to_floor: e.target.checked })}
+              className="rounded"
+            />
+            Привязан к этажу
+          </label>
+          <button
+            type="submit"
+            disabled={addingOperation || !newOperation.name?.trim() || newOperation.norm_minutes === ''}
+            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+          >
+            {addingOperation ? 'Добавление...' : 'Добавить'}
           </button>
         </form>
       )}

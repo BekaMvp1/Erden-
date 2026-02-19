@@ -16,11 +16,12 @@ JWT_SECRET=длинный-секретный-ключ
 JWT_EXPIRES_IN=24h
 PORT=3001
 NODE_ENV=production
+FRONTEND_URL=https://your-app.netlify.app
 ```
 
 ### Frontend (Netlify)
 
-- `VITE_API_URL` — URL backend API (например `https://api.example.com`)
+- `VITE_API_URL` — URL backend API **только https://** (например `https://api.example.com`). Иначе Mixed Content.
 
 ## Backend (Render / VPS)
 
@@ -43,6 +44,8 @@ NODE_ENV=production
 - Указать `DATABASE_URL` в backend.
 - Для production рекомендуется SSL: `?sslmode=require`.
 
-## CORS
+## CORS и безопасность
 
-Backend настроен на `cors({ origin: true })` — для production лучше указать конкретный origin фронтенда.
+- Backend: `FRONTEND_URL` — URL фронтенда (только https://) для CORS allowlist.
+- Netlify: принудительный HTTPS redirect, security headers (HSTS, X-Content-Type-Options и др.).
+- Проверка: DevTools → Console (нет Mixed Content), иконка замочка в адресной строке.

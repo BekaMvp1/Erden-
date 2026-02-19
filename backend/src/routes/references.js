@@ -103,8 +103,69 @@ router.get('/clients', async (req, res, next) => {
  */
 router.get('/operations', async (req, res, next) => {
   try {
-    const ops = await db.Operation.findAll({ order: [['name']] });
+    const ops = await db.Operation.findAll({
+      include: [{ model: db.BuildingFloor, as: 'BuildingFloor', attributes: ['id', 'name'] }],
+      order: [['name']],
+    });
     res.json(ops);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/references/operations
+ * Добавление операции (admin/manager)
+ */
+router.post('/operations', async (req, res, next) => {
+  try {
+    if (!['admin', 'manager'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const { name, norm_minutes, category, default_floor_id, locked_to_floor } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Укажите название операции' });
+    }
+    const norm = parseFloat(norm_minutes);
+    if (isNaN(norm) || norm < 0) {
+      return res.status(400).json({ error: 'Укажите норму времени (минуты, число ≥ 0)' });
+    }
+    const validCategory = ['CUTTING', 'SEWING', 'FINISH'].includes(category) ? category : 'SEWING';
+    const op = await db.Operation.create({
+      name: String(name).trim(),
+      norm_minutes: norm,
+      category: validCategory,
+      default_floor_id: default_floor_id ? Number(default_floor_id) : null,
+      locked_to_floor: Boolean(locked_to_floor),
+    });
+    const created = await db.Operation.findByPk(op.id, {
+      include: [{ model: db.BuildingFloor, as: 'BuildingFloor', attributes: ['id', 'name'] }],
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/references/operations/:id
+ * Удаление операции (admin/manager). Нельзя удалить, если операция используется в заказах.
+ */
+router.delete('/operations/:id', async (req, res, next) => {
+  try {
+    if (!['admin', 'manager'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Неверный ID' });
+    const op = await db.Operation.findByPk(id);
+    if (!op) return res.status(404).json({ error: 'Операция не найдена' });
+    const used = await db.OrderOperation.count({ where: { operation_id: id } });
+    if (used > 0) {
+      return res.status(400).json({ error: `Операция используется в ${used} заказах. Удаление невозможно.` });
+    }
+    await op.destroy();
+    res.status(204).send();
   } catch (err) {
     next(err);
   }
