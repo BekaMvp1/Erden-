@@ -44,14 +44,21 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS: allowlist — production: FRONTEND_URL (https), dev: localhost:5173
-const allowedOrigins = process.env.FRONTEND_URL
-  ? [process.env.FRONTEND_URL, "http://localhost:5173"]
-  : ["http://localhost:5173"];
+// CORS: allowlist — FRONTEND_URL (https), localhost:5173 в dev, если origin отсутствует — разрешить
+const allowedOrigins = [];
+if (process.env.FRONTEND_URL) {
+  process.env.FRONTEND_URL.split(",").forEach((u) => {
+    const trimmed = u.trim().replace(/\/$/, "");
+    if (trimmed) allowedOrigins.push(trimmed);
+  });
+}
+allowedOrigins.push("http://localhost:5173");
+
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
       cb(null, false);
     },
   })
