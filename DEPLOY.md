@@ -20,9 +20,24 @@
 
 ## Netlify (Frontend)
 
-- **Build command:** `cd frontend && npm ci && npm run build`
-- **Publish directory:** `frontend/dist`
-- **Base directory:** оставить пустым или `frontend` (если репозиторий — корень монорепо)
+- **Build command:** `cd frontend && npm ci && npm run build` (или из `frontend/netlify.toml`)
+- **Publish directory:** `frontend/dist` (при base=пусто) или `dist` (при base=`frontend`)
+- **Base directory:** `frontend` (если репозиторий — корень монорепо)
+
+### SPA fallback (404 на маршрутах /dispatcher, /login и т.д.)
+
+Редиректы заданы в `frontend/netlify.toml`:
+```toml
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+```
+
+**Проверка после `npm run build`:**
+- Vite создаёт `frontend/dist/` с `index.html` и `assets/`
+- В Netlify **Publish directory** должен указывать на `dist` (при base=`frontend`) или `frontend/dist` (при base=пусто)
+- Если используется `public/_redirects` вместо netlify.toml — после сборки файл `dist/_redirects` должен существовать
 
 ### Переменные окружения (Netlify)
 

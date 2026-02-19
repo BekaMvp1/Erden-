@@ -1,8 +1,9 @@
 # Конфигурация Netlify для развёртывания frontend
-# Разместить в корне frontend/ или указать base = "frontend"
+# При base = "frontend" в Netlify UI — config ищется в frontend/
 
 [build]
-  command = "npm install && npm run build"
+  base = "frontend"
+  command = "npm ci && npm run build"
   publish = "dist"
 
 [build.environment]
