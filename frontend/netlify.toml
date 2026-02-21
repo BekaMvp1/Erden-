@@ -1,5 +1,9 @@
 # Конфигурация Netlify для развёртывания frontend
 # При base = "frontend" в Netlify UI — config ищется в frontend/
+#
+# ОБЯЗАТЕЛЬНО: Site settings → Environment variables → добавить:
+#   VITE_API_URL = https://ваш-backend.onrender.com
+# (URL backend API, только https://)
 
 [build]
   base = "frontend"

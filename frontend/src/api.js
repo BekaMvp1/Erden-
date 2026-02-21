@@ -20,6 +20,7 @@ async function request(path, options = {}) {
     ...options,
     headers,
     mode: "cors",
+    cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
 

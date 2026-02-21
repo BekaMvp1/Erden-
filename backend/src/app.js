@@ -45,6 +45,16 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
+// Разрешить все Netlify-деплои (*.netlify.app)
+const isNetlify = (origin) => {
+  if (!origin || typeof origin !== "string") return false;
+  try {
+    return new URL(origin).hostname.endsWith(".netlify.app");
+  } catch {
+    return false;
+  }
+};
+
 // Разрешить локальную сеть (телефон/планшет с того же Wi‑Fi)
 const isLocalNetwork = (origin) => {
   if (!origin || typeof origin !== "string") return false;
@@ -63,6 +73,7 @@ const corsOptions = {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (isNetlify(origin)) return cb(null, true);
     if (isLocalNetwork(origin)) return cb(null, true);
     cb(null, false);
   },
@@ -80,6 +91,13 @@ app.use(cors(corsOptions));
 // Health check — первым, до всех роутов
 app.get("/", (req, res) => res.json({ ok: true }));
 app.get("/health", (req, res) => res.json({ ok: true }));
+
+// Отключить кэш для API — чтобы заказы всегда подгружались свежие
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Pragma", "no-cache");
+  next();
+});
 
 // Security headers
 app.use(helmet({
