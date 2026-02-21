@@ -47,6 +47,12 @@ body {
   touch-action: manipulation;
 }
 
+/* Гарантия видимости текста на тёмном фоне */
+#root {
+  min-height: 100vh;
+  color: inherit;
+}
+
 /* Скрыть нативную иконку календаря — используем свою */
 input[type="date"].planning-date-input::-webkit-calendar-picker-indicator {
   opacity: 0;

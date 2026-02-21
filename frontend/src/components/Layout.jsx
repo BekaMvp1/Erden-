@@ -96,10 +96,8 @@ export default function Layout() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [cuttingTypes, setCuttingTypes] = useState([]);
   const [cuttingOpen, setCuttingOpen] = useState(false);
-  // На мобильном меню открыто по умолчанию — сразу видно навигацию
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(() =>
-    typeof window !== 'undefined' && window.innerWidth < 768
-  );
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
 
   const isReferences = location.pathname === '/references';
   const isCutting = location.pathname.startsWith('/cutting');
@@ -118,15 +116,18 @@ export default function Layout() {
   useEffect(() => {
     if (!isReferences) {
       setSummaryLoading(true);
+      setConnectionError(false);
       api.dashboard
         .summary()
         .then((d) => {
           setSummary(d);
           setSummaryLoading(false);
+          setConnectionError(false);
         })
         .catch(() => {
           setSummary(null);
           setSummaryLoading(false);
+          setConnectionError(true);
         });
     }
   }, [isReferences]);
@@ -148,7 +149,7 @@ export default function Layout() {
   ];
 
   return (
-    <div className="flex h-screen bg-accent-2 dark:bg-dark-950 overflow-hidden">
+    <div className="flex h-screen bg-[#656D3F] dark:bg-[#000610] overflow-hidden text-[#FDEB9E]">
       {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div
@@ -160,12 +161,12 @@ export default function Layout() {
 
       {/* Sidebar — скрыт на мобильном, выезжает по кнопке */}
       <aside
-        className={`fixed md:relative inset-y-0 left-0 z-50 w-64 md:w-56 bg-accent-3 dark:bg-dark-900 sidebar-header-border flex flex-col transform transition-transform duration-200 ease-out ${
+        className={`fixed md:relative inset-y-0 left-0 z-50 w-64 md:w-56 bg-[#492828] dark:bg-[#000B58] sidebar-header-border flex flex-col transform transition-transform duration-200 ease-out ${
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
         <div className="header-top flex items-center p-4">
-          <h1 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text">Швейная фабрика</h1>
+          <h1 className="text-lg font-semibold text-[#FDEB9E]">Швейная фабрика</h1>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map(({ to, label, icon, end, dropdown }) =>
@@ -176,7 +177,7 @@ export default function Layout() {
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
                     isCutting
                       ? 'bg-primary-600 text-white'
-                      : 'text-[#ECECEC]/90 dark:text-dark-text/80 hover:bg-accent-1/30 dark:hover:bg-dark-2 hover:text-[#ECECEC] dark:hover:text-dark-text'
+                      : 'text-[#FDEB9E]/90 hover:bg-white/10 hover:text-[#FDEB9E]'
                   }`}
                 >
                   {NAV_ICONS[icon]}
@@ -196,7 +197,7 @@ export default function Layout() {
                           `block px-3 py-1.5 rounded text-sm ${
                             isActive
                               ? 'bg-primary-600/80 text-white'
-                              : 'text-[#ECECEC]/80 dark:text-dark-text/70 hover:bg-accent-1/20 dark:hover:bg-dark-2'
+                              : 'text-[#FDEB9E]/80 hover:bg-white/10'
                           }`
                         }
                       >
@@ -216,7 +217,7 @@ export default function Layout() {
                   `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
                     isActive
                       ? 'bg-primary-600 text-white'
-                      : 'text-[#ECECEC]/90 dark:text-dark-text/80 hover:bg-accent-1/30 dark:hover:bg-dark-2 hover:text-[#ECECEC] dark:hover:text-dark-text'
+                      : 'text-[#FDEB9E]/90 hover:bg-white/10 hover:text-[#FDEB9E]'
                   }`
                 }
               >
@@ -233,7 +234,7 @@ export default function Layout() {
         <header className="header-top bg-accent-3 dark:bg-dark-900 flex items-center justify-between px-3 md:px-6 gap-2">
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="p-2 rounded-lg md:hidden hover:bg-accent-1/30 dark:hover:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
+            className="p-2 rounded-lg md:hidden hover:bg-white/10 text-[#FDEB9E]"
             aria-label="Меню"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -244,7 +245,7 @@ export default function Layout() {
           <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 hover:bg-accent-1/40 dark:hover:bg-dark-3 text-[#ECECEC] dark:text-dark-text transition-colors duration-300 ease-out"
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-[#FDEB9E] transition-colors duration-300 ease-out"
               title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
             >
               {theme === 'dark' ? (
@@ -261,7 +262,7 @@ export default function Layout() {
                 </svg>
               )}
             </button>
-            <span className="text-xs md:text-sm text-[#ECECEC] dark:text-dark-text/90 truncate max-w-[120px] md:max-w-none">
+            <span className="text-xs md:text-sm text-[#FDEB9E] truncate max-w-[120px] md:max-w-none">
               {user?.name}
               {user?.role && (ROLE_LABELS[user.role] || user.role) !== user?.name && (
                 <span className="hidden sm:inline"> • {ROLE_LABELS[user.role] || user.role}</span>
@@ -269,14 +270,19 @@ export default function Layout() {
             </span>
             <button
               onClick={logout}
-              className="px-2 md:px-3 py-1.5 text-xs md:text-sm rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3 transition-colors duration-300 ease-out"
+              className="px-2 md:px-3 py-1.5 text-xs md:text-sm rounded-lg bg-white/10 text-[#FDEB9E] hover:bg-white/20 transition-colors duration-300 ease-out"
             >
               Выход
             </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-accent-2 dark:bg-dark-950">
+        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-[#656D3F] dark:bg-[#000610]">
+          {connectionError && (
+            <div className="mb-4 p-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400">
+              <strong>Сервер не отвечает.</strong> Запустите backend: <code className="bg-black/20 px-1 rounded">cd backend && npm run dev</code>
+            </div>
+          )}
           {!isReferences && (
             <DashboardSummary data={summary} loading={summaryLoading} />
           )}

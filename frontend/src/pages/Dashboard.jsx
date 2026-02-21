@@ -26,33 +26,14 @@ export default function Dashboard() {
   const [searchInput, setSearchInput] = useState('');
   const [statuses, setStatuses] = useState([]);
 
-  useEffect(() => {
-    loadStatuses();
-  }, []);
-
-  useEffect(() => {
-    loadOrders();
-  }, [statusFilter, searchTerm]);
-
-  // Автообновление при возврате в приложение (телефон, другая вкладка)
-  useRefreshOnVisible(loadOrders);
-
-  // Debounce поиска 300ms
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchTerm(searchInput.trim());
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  const loadStatuses = async () => {
+  const loadStatuses = useCallback(async () => {
     try {
       const data = await api.references.orderStatus();
       setStatuses(data);
     } catch {}
-  };
+  }, []);
 
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
@@ -65,7 +46,26 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, searchTerm]);
+
+  useEffect(() => {
+    loadStatuses();
+  }, [loadStatuses]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  // Автообновление при возврате в приложение (телефон, другая вкладка)
+  useRefreshOnVisible(loadOrders);
+
+  // Debounce поиска 300ms
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchTerm(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const clearSearch = useCallback(() => {
     setSearchInput('');
@@ -91,15 +91,15 @@ export default function Dashboard() {
   const canEdit = !!user;
 
   return (
-    <div>
+    <div className="text-[#FDEB9E]">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl md:text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Заказ</h1>
+          <h1 className="text-xl md:text-2xl font-bold">Заказ</h1>
           <button
             type="button"
             onClick={() => loadOrders()}
             disabled={loading}
-            className="p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3 disabled:opacity-50"
+            className="p-2 rounded-lg bg-black/20 text-[#FDEB9E] hover:bg-black/30 disabled:opacity-50"
             title="Обновить список"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -113,7 +113,7 @@ export default function Dashboard() {
             placeholder="Просто поиск"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-accent-1/20 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+            className="w-full px-3 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] placeholder-white/50"
           />
           {searchInput && (
           <button
@@ -132,7 +132,7 @@ export default function Dashboard() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-accent-1/20 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text shrink-0"
+            className="px-3 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] shrink-0"
           >
             <option value="">Все статусы</option>
             {statuses.map((s) => (
@@ -146,9 +146,9 @@ export default function Dashboard() {
 
       <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden transition-block hover:shadow-xl">
         {loading ? (
-          <div className="p-6 md:p-8 text-center text-[#ECECEC]/80 dark:text-dark-text/80">Загрузка...</div>
+          <div className="p-6 md:p-8 text-center text-[#FDEB9E]/90">Загрузка...</div>
         ) : orders.length === 0 ? (
-          <div className="p-6 md:p-8 text-center text-[#ECECEC]/80 dark:text-dark-text/80">Нет заказов</div>
+          <div className="p-6 md:p-8 text-center text-[#FDEB9E]/90">Нет заказов</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">

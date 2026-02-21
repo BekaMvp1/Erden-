@@ -58,11 +58,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-accent-2 dark:bg-dark-950 relative">
+    <div className="min-h-screen flex items-center justify-center bg-[#656D3F] dark:bg-[#003161] relative">
       <button
         type="button"
         onClick={toggleTheme}
-        className="absolute top-4 right-4 p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3 transition-colors"
+        className="absolute top-4 right-4 p-2 rounded-lg bg-black/20 text-[#FDEB9E] hover:bg-black/30 transition-colors"
         title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
       >
         {theme === 'dark' ? (
@@ -75,8 +75,8 @@ export default function Login() {
           </svg>
         )}
       </button>
-      <div className="w-full max-w-sm p-8 bg-accent-3/90 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 shadow-xl animate-page-enter">
-        <h1 className="text-2xl font-bold text-center text-primary-400 mb-6">
+      <div className="w-full max-w-sm p-8 bg-[#492828]/90 dark:bg-[#000B58] rounded-xl border border-white/30 shadow-xl animate-page-enter">
+        <h1 className="text-2xl font-bold text-center text-[#FDEB9E] mb-6">
           Швейная фабрика
         </h1>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -86,23 +86,23 @@ export default function Login() {
             </div>
           )}
           <div>
-            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Email</label>
+            <label className="block text-sm text-[#FDEB9E]/90 mb-1">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text focus:border-primary-500 focus:outline-none"
+              className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] placeholder-white/40 focus:border-[#40c9c5] focus:outline-none"
               required
               autoComplete="email"
             />
           </div>
           <div>
-            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Пароль</label>
+            <label className="block text-sm text-[#FDEB9E]/90 mb-1">Пароль</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text focus:border-primary-500 focus:outline-none"
+              className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] placeholder-white/40 focus:border-[#40c9c5] focus:outline-none"
               required
               autoComplete="current-password"
             />
@@ -110,12 +110,12 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-primary-600 text-white font-medium hover:bg-primary-700 disabled:opacity-50"
+            className="w-full py-2.5 rounded-lg bg-[#006A67] text-[#FDEB9E] font-medium hover:bg-[#00807c] disabled:opacity-50"
           >
             {loading ? 'Вход...' : 'Войти'}
           </button>
         </form>
-        <p className="mt-4 text-xs text-[#ECECEC]/80 dark:text-dark-text/80 text-center">
+        <p className="mt-4 text-xs text-[#FDEB9E]/80 text-center">
           Демо: admin@factory.local / admin123
         </p>
       </div>
