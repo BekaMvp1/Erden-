@@ -24,6 +24,7 @@ const orderOperationsRoutes = require("./routes/orderOperations");
 const reportsRoutes = require("./routes/reports");
 const reportsV2Routes = require("./routes/reportsV2Routes");
 const referencesRoutes = require("./routes/references");
+const clientsRoutes = require("./routes/clients");
 const workshopsRoutes = require("./routes/workshops");
 const financeRoutes = require("./routes/finance");
 const aiRoutes = require("./routes/ai");
@@ -197,6 +198,13 @@ app.use(
   requireRole("admin", "manager", "technologist", "operator"),
   technologistFloorOnly,
   referencesRoutes,
+);
+app.use(
+  "/api/clients",
+  authenticate,
+  requireRole("admin", "manager", "technologist", "operator"),
+  technologistFloorOnly,
+  clientsRoutes,
 );
 app.use(
   "/api/workshops",
