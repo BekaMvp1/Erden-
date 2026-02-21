@@ -22,14 +22,11 @@ module.exports = {
     use_env_variable: 'DATABASE_URL',
     dialect: 'postgres',
     logging: false,
-    // SSL только для удалённых БД (не localhost)
-    ...(isLocalhost ? {} : {
-      dialectOptions: {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false,
-        },
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false,
       },
-    }),
+    },
   },
 };
