@@ -33,7 +33,15 @@ const cloudDb = new Sequelize(CLOUD_URL, {
   dialect: 'postgres',
   logging: false,
   dialectOptions: isCloud ? { ssl: { rejectUnauthorized: false } } : {},
+  define: {
+    underscored: true,
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+  },
 });
+
+const CloudOrder = require('../src/models/Order')(cloudDb, Sequelize.DataTypes);
 
 // Порядок таблиц (с учётом foreign keys): справочники → orders → order_*
 const TABLES = [
@@ -56,7 +64,61 @@ const TABLES = [
   'order_floor_distributions',
 ];
 
+function mapOrderToSnakeCase(row) {
+  const mapped = {
+    id: row.id,
+    client_id: row.client_id,
+    title: row.title,
+    quantity: row.quantity,
+    total_quantity: row.total_quantity != null ? row.total_quantity : row.quantity,
+    deadline: row.deadline,
+    status_id: row.status_id,
+    floor_id: row.floor_id,
+    building_floor_id: row.building_floor_id,
+    technologist_id: row.technologist_id,
+    workshop_id: row.workshop_id,
+    completed_at: row.completed_at,
+    planned_month: row.planned_month,
+    color: row.color,
+    size_in_numbers: row.size_in_numbers,
+    size_in_letters: row.size_in_letters,
+    comment: row.comment,
+    photos: row.photos,
+    created_at: row.created_at ?? row.createdAt,
+    updated_at: row.updated_at ?? row.updatedAt,
+  };
+  return mapped;
+}
+
+async function copyOrders() {
+  try {
+    const [rows] = await localDb.query('SELECT * FROM orders');
+    if (!rows || rows.length === 0) {
+      console.log('  orders: пусто, пропуск');
+      return 0;
+    }
+    const mappedOrders = rows.map(mapOrderToSnakeCase);
+    try {
+      await CloudOrder.bulkCreate(mappedOrders, { ignoreDuplicates: true });
+    } catch (e) {
+      console.error('  orders: ошибка вставки —', e.message);
+      throw e;
+    }
+    const count = await CloudOrder.count();
+    console.log('  orders: перенесено', rows.length);
+    console.log('Orders transferred:', rows.length);
+    console.log('Cloud orders after:', count);
+    return rows.length;
+  } catch (err) {
+    console.error('  orders: ошибка', err.message);
+    return 0;
+  }
+}
+
 async function copyTable(tableName) {
+  if (tableName === 'orders') {
+    return copyOrders();
+  }
   try {
     const [rows] = await localDb.query(`SELECT * FROM ${tableName}`);
     if (!rows || rows.length === 0) {
@@ -83,9 +145,6 @@ async function copyTable(tableName) {
       }
     }
     console.log(`  ${tableName}: ${inserted}/${rows.length}`);
-    if (tableName === 'orders') {
-      console.log('Orders transferred:', inserted);
-    }
     return inserted;
   } catch (err) {
     console.error(`  ${tableName}: ошибка`, err.message);
