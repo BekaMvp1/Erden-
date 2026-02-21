@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.cloud
 *.log
 dist/
 .DS_Store

@@ -6,18 +6,42 @@ import { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '');
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('user');
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {}
+    const token = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+    if (!token || !storedUser) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+    // Проверяем токен на сервере — иначе без логина заходило
+    fetch(`${API_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then((res) => {
+        if (!res.ok) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          return;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (data?.user) setUser(data.user);
+      })
+      .catch(() => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = (data) => {

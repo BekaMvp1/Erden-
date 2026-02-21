@@ -55,6 +55,36 @@
 
 ---
 
+## Перенос данных: локальная БД → облачная (Netlify)
+
+Если заказы и клиенты есть в локальной БД, но на Netlify они пустые — нужно скопировать данные:
+
+1. **Скопируйте строку подключения** из облачной БД (Neon, Supabase, Render):
+   - Neon: Dashboard → Connection string
+   - Supabase: Settings → Database → Connection string
+   - Render: PostgreSQL → Internal Database URL
+
+2. **Запустите скрипт** (в папке `backend`):
+   ```bash
+   cd backend
+   set CLOUD_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+   node scripts/export-to-cloud.js
+   ```
+   (PowerShell: `$env:CLOUD_DATABASE_URL="postgresql://..."`)
+
+3. Или создайте файл `.env.cloud`:
+   ```
+   CLOUD_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+   ```
+   И запустите:
+   ```bash
+   node -r dotenv/config scripts/export-to-cloud.js dotenv_config_path=.env.cloud
+   ```
+
+4. После успешного выполнения — клиенты и заказы появятся на Netlify.
+
+---
+
 ## Локальный запуск
 
 ### Backend

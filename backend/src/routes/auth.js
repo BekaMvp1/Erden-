@@ -7,8 +7,33 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../models');
 const { QueryTypes } = require('sequelize');
+const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
+
+/**
+ * GET /api/auth/me — проверка токена, возвращает текущего пользователя
+ * Используется при загрузке приложения для валидации сессии
+ */
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+    res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        floor_id: user.floor_id,
+      },
+    });
+  } catch (err) {
+    res.status(401).json({ error: 'Не авторизован' });
+  }
+});
 
 /**
  * GET /api/auth/debug — проверка БД (для диагностики)
