@@ -8,8 +8,8 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3002',
-      '/health': 'http://localhost:3002',
+      '/api': { target: 'http://127.0.0.1:3002', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:3002', changeOrigin: true },
     },
   },
 })

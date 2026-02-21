@@ -96,7 +96,10 @@ export default function Layout() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [cuttingTypes, setCuttingTypes] = useState([]);
   const [cuttingOpen, setCuttingOpen] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // На мобильном меню открыто по умолчанию — сразу видно навигацию
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768
+  );
 
   const isReferences = location.pathname === '/references';
   const isCutting = location.pathname.startsWith('/cutting');
