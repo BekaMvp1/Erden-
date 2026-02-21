@@ -19,7 +19,6 @@ async function request(path, options = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
-    credentials: "include",
     mode: "cors",
   });
   const data = await res.json().catch(() => ({}));

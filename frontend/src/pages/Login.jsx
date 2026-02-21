@@ -2,11 +2,13 @@
  * Страница входа
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { api } from '../api';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -17,6 +19,13 @@ export default function Login() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
+  // Прогрев бэкенда (Render free tier засыпает, первый запрос может таймаутиться)
+  useEffect(() => {
+    if (API_URL) {
+      fetch(`${API_URL}/health`, { mode: 'cors' }).catch(() => {});
+    }
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -26,9 +35,22 @@ export default function Login() {
       login(data);
       navigate('/');
     } catch (err) {
-      let msg = err.message || 'Ошибка входа';
-      if (err.details) msg += '\n\nПодробности: ' + err.details;
-      setError(msg);
+      // Повтор при cold start (Failed to fetch = таймаут/сеть)
+      if (err.message === 'Failed to fetch' && API_URL) {
+        try {
+          await new Promise((r) => setTimeout(r, 3000));
+          const data = await api.auth.login(email, password);
+          login(data);
+          navigate('/');
+          return;
+        } catch (retryErr) {
+          setError(retryErr.message || 'Сервер не отвечает. Подождите и попробуйте снова.');
+        }
+      } else {
+        let msg = err.message || 'Ошибка входа';
+        if (err.details) msg += '\n\nПодробности: ' + err.details;
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
