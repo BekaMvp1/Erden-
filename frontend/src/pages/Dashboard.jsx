@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
+import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 
 const STATUS_COLORS = {
   Принят: 'bg-yellow-500/20 text-yellow-400',
@@ -32,6 +33,9 @@ export default function Dashboard() {
   useEffect(() => {
     loadOrders();
   }, [statusFilter, searchTerm]);
+
+  // Автообновление при возврате в приложение (телефон, другая вкладка)
+  useRefreshOnVisible(loadOrders);
 
   // Debounce поиска 300ms
   useEffect(() => {
@@ -89,7 +93,20 @@ export default function Dashboard() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
-        <h1 className="text-xl md:text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Заказ</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Заказ</h1>
+          <button
+            type="button"
+            onClick={() => loadOrders()}
+            disabled={loading}
+            className="p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3 disabled:opacity-50"
+            title="Обновить список"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <div className="flex-1 flex justify-center items-center gap-2 max-w-md w-full sm:w-auto sm:mx-auto">
           <input
             type="text"

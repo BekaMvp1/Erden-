@@ -45,10 +45,25 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
+// Разрешить локальную сеть (телефон/планшет с того же Wi‑Fi)
+const isLocalNetwork = (origin) => {
+  if (!origin || typeof origin !== "string") return false;
+  try {
+    const u = new URL(origin);
+    const host = u.hostname;
+    return host === "localhost" || host === "127.0.0.1" ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  } catch {
+    return false;
+  }
+};
+
 const corsOptions = {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (isLocalNetwork(origin)) return cb(null, true);
     cb(null, false);
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

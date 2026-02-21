@@ -4,9 +4,10 @@
  * Сумма матрицы должна строго равняться общему количеству
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
@@ -46,11 +47,18 @@ export default function CreateOrder() {
   // Фото заказа (base64)
   const [orderPhotos, setOrderPhotos] = useState([]);
 
-  useEffect(() => {
+  const loadRefs = useCallback(() => {
     api.references.clients().then(setClients);
     api.workshops.list().then(setWorkshops);
     api.sizes.list().then((data) => setAvailableSizes(data || []));
   }, []);
+
+  useEffect(() => {
+    loadRefs();
+  }, [loadRefs]);
+
+  // Автообновление при возврате в приложение — новые клиенты от админа появятся на телефоне
+  useRefreshOnVisible(loadRefs);
 
   // Поиск цветов при вводе
   useEffect(() => {
