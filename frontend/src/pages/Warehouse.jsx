@@ -81,7 +81,7 @@ export default function Warehouse() {
     }
   };
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const canEdit = ['admin', 'manager'].includes(user.role);
 
   return (

@@ -8,7 +8,7 @@ if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
 }
 
 function getToken() {
-  return localStorage.getItem('token');
+  return sessionStorage.getItem('token');
 }
 
 async function request(path, options = {}) {
@@ -29,8 +29,8 @@ async function request(path, options = {}) {
 
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
       window.location.href = '/login';
     }
     const errMsg = data.error || `Ошибка ${res.status}`;
@@ -177,7 +177,7 @@ export const api = {
         request(`/api/reports/v2/plan-fact?${new URLSearchParams(params)}`),
       exportCsv: async (params) => {
         const q = new URLSearchParams(params).toString();
-        const token = localStorage.getItem('token');
+        const token = sessionStorage.getItem('token');
         const res = await fetch(`${API_URL}/api/reports/v2/export.csv?${q}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });

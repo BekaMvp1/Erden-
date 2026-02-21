@@ -8,7 +8,7 @@ if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
 }
 
 function getToken() {
-  return localStorage.getItem('token');
+  return sessionStorage.getItem('token');
 }
 
 async function request(path, options = {}) {
@@ -23,8 +23,8 @@ async function request(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
       window.location.href = '/login';
     }
     const err = new Error(data.error || `Ошибка ${res.status}`);

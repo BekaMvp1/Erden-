@@ -148,7 +148,7 @@ export default function Planning() {
   const [flowApplyLoading, setFlowApplyLoading] = useState(false);
   const [flowApplySuccess, setFlowApplySuccess] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const canEdit = ['admin', 'manager', 'technologist'].includes(user.role);
   const canApply = ['admin', 'manager', 'technologist'].includes(user.role);
 

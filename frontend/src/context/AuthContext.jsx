@@ -16,8 +16,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
+    const token = sessionStorage.getItem('token');
+    const storedUser = sessionStorage.getItem('user');
     if (!token || !storedUser) {
       setLoading(false);
       return;
@@ -29,8 +29,8 @@ export function AuthProvider({ children }) {
     })
       .then((res) => {
         if (!res.ok) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('user');
           setUser(null);
           return;
         }
@@ -40,22 +40,22 @@ export function AuthProvider({ children }) {
         if (data?.user) setUser(data.user);
       })
       .catch(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('user');
         setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const login = (data) => {
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
+    sessionStorage.setItem('token', data.token);
+    sessionStorage.setItem('user', JSON.stringify(data.user));
     setUser(data.user);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
     setUser(null);
   };
 

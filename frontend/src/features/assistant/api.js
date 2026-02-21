@@ -8,7 +8,7 @@ if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
 }
 
 function getToken() {
-  return localStorage.getItem('token');
+  return sessionStorage.getItem('token');
 }
 
 /**
