@@ -2,7 +2,10 @@
  * API клиент для backend
  */
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '');
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
+  console.error('VITE_API_URL is not defined');
+}
 
 function getToken() {
   return localStorage.getItem('token');
@@ -175,8 +178,7 @@ export const api = {
       exportCsv: async (params) => {
         const q = new URLSearchParams(params).toString();
         const token = localStorage.getItem('token');
-        const base = import.meta.env.VITE_API_URL || '';
-        const res = await fetch(`${base}/api/reports/v2/export.csv?${q}`, {
+        const res = await fetch(`${API_URL}/api/reports/v2/export.csv?${q}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) throw new Error(await res.text());

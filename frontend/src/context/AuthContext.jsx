@@ -6,7 +6,10 @@ import { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '');
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
+  console.error('VITE_API_URL is not defined');
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
