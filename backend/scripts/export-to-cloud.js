@@ -42,6 +42,8 @@ const cloudDb = new Sequelize(CLOUD_URL, {
 });
 
 const CloudOrder = require('../src/models/Order')(cloudDb, Sequelize.DataTypes);
+const CloudClient = require('../src/models/Client')(cloudDb, Sequelize.DataTypes);
+const CloudOrderStatus = require('../src/models/OrderStatus')(cloudDb, Sequelize.DataTypes);
 
 // Порядок таблиц (с учётом foreign keys): справочники → orders → order_*
 const TABLES = [
@@ -93,22 +95,46 @@ function mapOrderToSnakeCase(row) {
 async function copyOrders() {
   try {
     const [rows] = await localDb.query('SELECT * FROM orders');
-    if (!rows || rows.length === 0) {
+    const localOrders = rows || [];
+    console.log('Local orders:', localOrders.length);
+
+    if (localOrders.length === 0) {
       console.log('  orders: пусто, пропуск');
       return 0;
     }
-    const mappedOrders = rows.map(mapOrderToSnakeCase);
+
+    const mappedOrders = localOrders.map(mapOrderToSnakeCase);
+    console.log('Mapped sample:', mappedOrders[0]);
+
+    const first = mappedOrders[0];
+    const cloudClient = await CloudClient.findByPk(first.client_id);
+    const cloudStatus = await CloudOrderStatus.findByPk(first.status_id);
+    if (!cloudClient || !cloudStatus) {
+      console.error('Missing FK client_id/status_id in cloud', {
+        client_id: first.client_id,
+        clientExists: !!cloudClient,
+        status_id: first.status_id,
+        statusExists: !!cloudStatus,
+      });
+      process.exit(1);
+    }
+
+    const beforeCount = await CloudOrder.count();
+    console.log('Cloud orders before:', beforeCount);
+
     try {
       await CloudOrder.bulkCreate(mappedOrders, { ignoreDuplicates: true });
-    } catch (e) {
-      console.error('  orders: ошибка вставки —', e.message);
-      throw e;
+    } catch (err) {
+      console.error('Orders insert failed:', err);
+      if (err?.original) console.error('PG original:', err.original);
+      process.exit(1);
     }
-    const count = await CloudOrder.count();
-    console.log('  orders: перенесено', rows.length);
-    console.log('Orders transferred:', rows.length);
-    console.log('Cloud orders after:', count);
-    return rows.length;
+
+    const afterCount = await CloudOrder.count();
+    console.log('Cloud orders after:', afterCount);
+    console.log('  orders: перенесено', localOrders.length);
+    console.log('Orders transferred:', localOrders.length);
+    return localOrders.length;
   } catch (err) {
     console.error('  orders: ошибка', err.message);
     return 0;
