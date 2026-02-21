@@ -62,6 +62,10 @@ app.options("*", cors(corsOptions));
 app.options("/*", cors(corsOptions));
 app.use(cors(corsOptions));
 
+// Health check — первым, до всех роутов
+app.get("/", (req, res) => res.json({ ok: true }));
+app.get("/health", (req, res) => res.json({ ok: true }));
+
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -78,11 +82,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use("/api/auth", authLimiter, authRoutes);
-
-// Health check (Render/Netlify)
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
 
 // Справочник размеров (для матрицы цвет×размер)
 app.use(

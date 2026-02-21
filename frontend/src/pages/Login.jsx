@@ -23,6 +23,7 @@ export default function Login() {
   useEffect(() => {
     if (API_URL) {
       fetch(`${API_URL}/health`, { mode: 'cors' }).catch(() => {});
+      fetch(API_URL.replace(/\/$/, ''), { mode: 'cors' }).catch(() => {});
     }
   }, []);
 
