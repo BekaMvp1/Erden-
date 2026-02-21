@@ -57,7 +57,9 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
+// Preflight для всех путей (в т.ч. /api/auth/login)
 app.options("*", cors(corsOptions));
+app.options("/*", cors(corsOptions));
 app.use(cors(corsOptions));
 
 // Security headers
