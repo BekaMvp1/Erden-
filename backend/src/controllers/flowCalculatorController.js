@@ -182,7 +182,7 @@ async function calc(req, res) {
         notes.push(`Мощность: (R_сек / t) * ${period_days} дней = ${capacity_total_in_period.toFixed(0)} ед`);
       } else {
         // Мощность из БД (sewers.capacity_per_day по этажу)
-        let dailyCapacity = 500;
+        let dailyCapacity = 200;
         const effectiveFloorId = floor_id && floor_id !== 'all' ? Number(floor_id) : null;
         if (effectiveFloorId) {
           const capRows = await db.sequelize.query(
@@ -195,7 +195,7 @@ async function calc(req, res) {
               type: db.sequelize.QueryTypes.SELECT,
             }
           );
-          dailyCapacity = capRows[0]?.daily_capacity ?? 500;
+          dailyCapacity = capRows[0]?.daily_capacity ?? 200;
         } else {
           const workshop = await db.Workshop.findByPk(workshop_id);
           if (workshop?.floors_count === 1) {
@@ -205,7 +205,7 @@ async function calc(req, res) {
                JOIN sewers s ON s.technologist_id = t.id`,
               { type: db.sequelize.QueryTypes.SELECT }
             );
-            dailyCapacity = capRows[0]?.daily_capacity ?? 500;
+            dailyCapacity = capRows[0]?.daily_capacity ?? 200;
           }
         }
         capacity_total_in_period = dailyCapacity * period_days;
@@ -335,7 +335,7 @@ async function applyAuto(req, res) {
             type: db.sequelize.QueryTypes.SELECT,
           }
         );
-        capacity_per_day = capRows[0]?.daily_capacity ?? 500;
+        capacity_per_day = capRows[0]?.daily_capacity ?? 200;
       } else {
         const capRows = await db.sequelize.query(
           `SELECT COALESCE(SUM(s.capacity_per_day), 0)::int as daily_capacity
@@ -343,7 +343,7 @@ async function applyAuto(req, res) {
            JOIN sewers s ON s.technologist_id = t.id`,
           { type: db.sequelize.QueryTypes.SELECT }
         );
-        capacity_per_day = capRows[0]?.daily_capacity ?? 500;
+        capacity_per_day = capRows[0]?.daily_capacity ?? 200;
       }
     } else {
       return res.status(400).json({ error: 'Укажите режим (mode) и параметры для расчёта мощности' });

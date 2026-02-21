@@ -104,6 +104,8 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
+    cuttingSummary: (orderId) =>
+      request(`/api/planning/cutting-summary?order_id=${orderId}`),
     calcCapacity: (data) =>
       request('/api/planning/calc-capacity', {
         method: 'POST',

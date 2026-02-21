@@ -59,18 +59,12 @@ export default function PlanningAssign() {
         if (orderIdParam && filtered.some((o) => String(o.id) === orderIdParam)) {
           setSelected((s) => ({ ...s, order_id: orderIdParam }));
           const order = await api.orders.get(orderIdParam);
-          if (order?.building_floor_id && order?.technologist_id) {
+          const floorId = order?.building_floor_id || order?.floor_id;
+          if (floorId && order?.technologist_id) {
             setSelected((s) => ({
               ...s,
               order_id: String(order.id),
-              building_floor_id: String(order.building_floor_id),
-              technologist_id: String(order.technologist_id),
-            }));
-          } else if (order?.floor_id && order?.technologist_id) {
-            setSelected((s) => ({
-              ...s,
-              order_id: String(order.id),
-              building_floor_id: String(order.floor_id),
+              building_floor_id: String(floorId),
               technologist_id: String(order.technologist_id),
             }));
             const sewersData = await api.references.sewers(order.technologist_id);

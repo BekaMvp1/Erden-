@@ -759,6 +759,7 @@ router.get('/:id', async (req, res, next) => {
     const order = await db.Order.findByPk(req.params.id, {
       include: [
         { model: db.Client, as: 'Client' },
+        { model: db.Workshop, as: 'Workshop' },
         { model: db.OrderStatus, as: 'OrderStatus' },
         { model: db.Floor, as: 'Floor' },
         { model: db.BuildingFloor, as: 'BuildingFloor' },

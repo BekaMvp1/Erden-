@@ -235,12 +235,17 @@ router.get('/model-table', async (req, res, next) => {
 
     const byDate = new Map();
     for (const pd of planDays) {
-      byDate.set(pd.date, { date: pd.date, planned_qty: pd.planned_qty || 0, actual_qty: pd.actual_qty || 0 });
+      byDate.set(pd.date, {
+        date: pd.date,
+        planned_qty: pd.planned_qty || 0,
+        actual_qty: pd.actual_qty || 0,
+        notes: pd.notes || null,
+      });
     }
 
     const rows = dates.map((date) => {
       const existing = byDate.get(date);
-      return existing || { date, planned_qty: 0, actual_qty: 0 };
+      return existing || { date, planned_qty: 0, actual_qty: 0, notes: null };
     });
 
     let planned_sum = 0;
@@ -273,7 +278,7 @@ router.put('/day', async (req, res, next) => {
       return res.status(403).json({ error: 'Оператор не может редактировать план' });
     }
 
-    const { order_id, workshop_id, date, floor_id, planned_qty, actual_qty } = req.body;
+    const { order_id, workshop_id, date, floor_id, planned_qty, actual_qty, notes } = req.body;
     if (!order_id || !workshop_id || !date) {
       return res.status(400).json({ error: 'Укажите order_id, workshop_id, date' });
     }
@@ -297,6 +302,7 @@ router.put('/day', async (req, res, next) => {
 
     const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
     const actual = Math.max(0, parseInt(actual_qty, 10) || 0);
+    const notesVal = typeof notes === 'string' ? notes.trim() || null : null;
 
     const [row, created] = await db.ProductionPlanDay.findOrCreate({
       where: {
@@ -308,14 +314,53 @@ router.put('/day', async (req, res, next) => {
       defaults: {
         planned_qty: planned,
         actual_qty: actual,
+        notes: notesVal,
       },
     });
 
     if (!created) {
-      await row.update({ planned_qty: planned, actual_qty: actual });
+      await row.update({ planned_qty: planned, actual_qty: actual, notes: notesVal });
     }
 
     res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/planning/cutting-summary?order_id=
+ * План и факт по раскрою для заказа — приходит в Планирование из Раскроя
+ */
+router.get('/cutting-summary', async (req, res, next) => {
+  try {
+    const { order_id } = req.query;
+    if (!order_id) return res.status(400).json({ error: 'Укажите order_id' });
+
+    const order = await db.Order.findByPk(order_id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    const totalQuantity = order.total_quantity ?? order.quantity ?? 0;
+    const cuttingTasks = await db.CuttingTask.findAll({
+      where: { order_id: Number(order_id) },
+      attributes: ['actual_variants'],
+    });
+    let cuttingPlannedTotal = 0;
+    let cuttingActualTotal = 0;
+    for (const t of cuttingTasks) {
+      const variants = t.actual_variants || [];
+      for (const v of variants) {
+        cuttingPlannedTotal += parseInt(v.quantity_planned, 10) || 0;
+        cuttingActualTotal += parseInt(v.quantity_actual, 10) || 0;
+      }
+    }
+    if (cuttingPlannedTotal === 0) cuttingPlannedTotal = totalQuantity;
+
+    res.json({
+      total_quantity: totalQuantity,
+      cutting_planned_total: cuttingPlannedTotal,
+      cutting_actual_total: cuttingActualTotal,
+    });
   } catch (err) {
     next(err);
   }
@@ -327,12 +372,16 @@ router.put('/day', async (req, res, next) => {
  */
 router.post('/calc-capacity', async (req, res, next) => {
   try {
-    const { workshop_id, order_id, from, to, floor_id } = req.body;
+    const { workshop_id, order_id, from, to, floor_id, capacity_week } = req.body;
     if (!workshop_id || !order_id || !from || !to) {
       return res.status(400).json({ error: 'Укажите workshop_id, order_id, from, to' });
     }
     if (from > to) {
       return res.status(400).json({ error: 'Дата начала не может быть позже даты окончания' });
+    }
+    const capWeek = capacity_week != null && capacity_week !== '' ? parseInt(capacity_week, 10) : null;
+    if (capWeek != null && (capWeek < 1000 || capWeek > 5000)) {
+      return res.status(400).json({ error: 'Мощность в неделю должна быть от 1000 до 5000 ед' });
     }
 
     const workshop = await db.Workshop.findByPk(workshop_id);
@@ -372,25 +421,34 @@ router.post('/calc-capacity', async (req, res, next) => {
         type: db.sequelize.QueryTypes.SELECT,
       }
     );
-    const actualTotal = actualRows[0]?.actual_total ?? 0;
-    const remaining = Math.max(0, totalQuantity - actualTotal);
+    const planActualTotal = actualRows[0]?.actual_total ?? 0;
 
-    // 2) daily_capacity, working_days, total_capacity
-    let dailyCapacity = 500; // по умолчанию для Аутсорс/Аксы
-    if (effectiveFloorId) {
-      const capRows = await db.sequelize.query(
-        `SELECT COALESCE(SUM(s.capacity_per_day), 0)::int as daily_capacity
-         FROM technologists t
-         JOIN sewers s ON s.technologist_id = t.id
-         WHERE t.building_floor_id = :floorId
-         GROUP BY t.building_floor_id`,
-        {
-          replacements: { floorId: effectiveFloorId },
-          type: db.sequelize.QueryTypes.SELECT,
-        }
-      );
-      dailyCapacity = capRows[0]?.daily_capacity ?? 500;
+    // План и факт по раскрою — из CuttingTask.actual_variants
+    const cuttingTasks = await db.CuttingTask.findAll({
+      where: { order_id: Number(order_id) },
+      attributes: ['actual_variants'],
+    });
+    let cuttingPlannedTotal = 0;
+    let cuttingActualTotal = 0;
+    for (const t of cuttingTasks) {
+      const variants = t.actual_variants || [];
+      for (const v of variants) {
+        cuttingPlannedTotal += parseInt(v.quantity_planned, 10) || 0;
+        cuttingActualTotal += parseInt(v.quantity_actual, 10) || 0;
+      }
     }
+    // Если нет плана из раскроя — используем общее кол-во заказа
+    if (cuttingPlannedTotal === 0) {
+      cuttingPlannedTotal = totalQuantity;
+    }
+
+    const actualTotal = Math.max(planActualTotal, cuttingActualTotal);
+    // Для Предложенного плана: распределяем ФАКТ по раскрою (не план) по мощностям
+    const remaining = cuttingActualTotal > 0
+      ? cuttingActualTotal
+      : cuttingPlannedTotal > 0
+        ? cuttingPlannedTotal
+        : Math.max(0, totalQuantity - actualTotal);
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
@@ -401,22 +459,45 @@ router.post('/calc-capacity', async (req, res, next) => {
       d.setDate(d.getDate() + 1);
     }
     const workingDays = dates.length;
-    const totalCapacity = dailyCapacity * workingDays;
+
+    // 2) daily_capacity, total_capacity
+    // Если задана мощность в неделю (capacity_week): total = capacity_week * (дней / 7), daily = capacity_week / 7
+    let dailyCapacity = 200; // по умолчанию
+    let totalCapacity;
+    const capacityWeekNum = capacity_week != null && capacity_week !== '' ? parseInt(capacity_week, 10) : null;
+    if (capacityWeekNum && capacityWeekNum > 0) {
+      totalCapacity = Math.round(capacityWeekNum * (workingDays / 7));
+      dailyCapacity = Math.round(capacityWeekNum / 7);
+    } else {
+      if (effectiveFloorId) {
+        const capRows = await db.sequelize.query(
+          `SELECT COALESCE(SUM(s.capacity_per_day), 0)::int as daily_capacity
+           FROM technologists t
+           JOIN sewers s ON s.technologist_id = t.id
+           WHERE t.building_floor_id = :floorId
+           GROUP BY t.building_floor_id`,
+          {
+            replacements: { floorId: effectiveFloorId },
+            type: db.sequelize.QueryTypes.SELECT,
+          }
+        );
+        dailyCapacity = capRows[0]?.daily_capacity ?? 200;
+      }
+      totalCapacity = dailyCapacity * workingDays;
+    }
 
     // 3) overload, percent
     const percent = totalCapacity > 0 ? Math.round((remaining / totalCapacity) * 100) : 0;
     const overload = remaining > totalCapacity;
 
-    // 4) days — распределение по дням
+    // 4) days — равномерное распределение, сумма = ровно remaining (257+258+... = 1800)
     let days = [];
     if (!overload && workingDays > 0) {
       if (remaining > 0) {
         const base = Math.floor(remaining / workingDays);
         const rest = remaining % workingDays;
         days = dates.map((date, i) => {
-          let plannedQty = base;
-          if (i < rest) plannedQty += 1;
-          plannedQty = Math.min(plannedQty, dailyCapacity);
+          const plannedQty = base + (i < rest ? 1 : 0);
           return { date, planned_qty: plannedQty };
         });
       } else {
@@ -427,10 +508,14 @@ router.post('/calc-capacity', async (req, res, next) => {
     res.json({
       total_quantity: totalQuantity,
       actual_total: actualTotal,
+      cutting_planned_total: cuttingPlannedTotal,
+      cutting_actual_total: cuttingActualTotal,
+      plan_actual_total: planActualTotal,
       remaining,
       daily_capacity: dailyCapacity,
       working_days: workingDays,
       total_capacity: totalCapacity,
+      capacity_week: capacityWeekNum || null,
       percent,
       overload,
       days,
@@ -535,6 +620,11 @@ router.post('/apply-capacity', async (req, res, next) => {
           },
           { transaction: t }
         );
+      }
+
+      // Чтобы план отображался в «Информации о заказе», связываем заказ с этажом при применении
+      if (effectiveFloorId != null && (order.building_floor_id == null || order.building_floor_id === '')) {
+        await order.update({ building_floor_id: effectiveFloorId }, { transaction: t });
       }
 
       await t.commit();

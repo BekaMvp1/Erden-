@@ -1,5 +1,15 @@
 # Алгоритм планирования
 
+## Расчёт по мощности (POST /api/planning/calc-capacity)
+
+1. **Остаток** = total_quantity заказа − actual_total (уже выполнено).
+2. **Мощность:**
+   - Если задана `capacity_week` (напр. 1800): `total_capacity = capacity_week × (дней / 7)`, `daily_capacity = capacity_week / 7`.
+   - Иначе: мощность из БД (сумма sewers.capacity_per_day по этажу).
+3. **Предложенный план:** концентрировать остаток в первые дни, не более daily_capacity в день.
+
+Пример: мощность 1800/неделю, выбрано 4 дня → total_capacity = 1800 × (4/7) ≈ 1028, daily ≈ 257.
+
 ## План на день (GET /api/planning/day)
 
 1. Получить список швей (с учётом этажа для технолога).

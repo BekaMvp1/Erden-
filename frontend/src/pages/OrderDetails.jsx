@@ -79,6 +79,10 @@ export default function OrderDetails() {
   const [viewingPhoto, setViewingPhoto] = useState(null);
   const [cuttingCompleteModalTask, setCuttingCompleteModalTask] = useState(null);
   const [expandedCuttingTaskIds, setExpandedCuttingTaskIds] = useState(() => new Set());
+  const [planModelData, setPlanModelData] = useState(null);
+  const [planModelLoading, setPlanModelLoading] = useState(false);
+  const [planEditModal, setPlanEditModal] = useState(null);
+  const [planSaving, setPlanSaving] = useState(false);
   const editColorInputRef = useRef(null);
   const editColorDropdownRef = useRef(null);
 
@@ -105,6 +109,97 @@ export default function OrderDetails() {
   useEffect(() => {
     loadOrder();
   }, [id]);
+
+  useEffect(() => {
+    if (!order?.workshop_id) {
+      setPlanModelData(null);
+      return;
+    }
+    const workshop = order.Workshop;
+    const floorsCount = workshop?.floors_count ?? 0;
+    const needFloor = floorsCount > 1;
+    const floorId = order.building_floor_id ?? order.floor_id;
+    if (needFloor && !floorId) {
+      setPlanModelData(null);
+      return;
+    }
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setDate(fromDate.getDate() - 14);
+    const from = fromDate.toISOString().slice(0, 10);
+    const toDate = new Date(today);
+    toDate.setDate(toDate.getDate() + 45);
+    const to = toDate.toISOString().slice(0, 10);
+    setPlanModelLoading(true);
+    const params = {
+      workshop_id: order.workshop_id,
+      order_id: order.id,
+      from,
+      to,
+    };
+    if (needFloor) params.floor_id = floorId;
+    api.planning
+      .modelTable(params)
+      .then(setPlanModelData)
+      .catch(() => setPlanModelData(null))
+      .finally(() => setPlanModelLoading(false));
+  }, [order?.id, order?.workshop_id, order?.building_floor_id, order?.floor_id, order?.Workshop?.floors_count]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && id) {
+        loadOrder();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [id]);
+
+  const loadPlanModelData = () => {
+    if (!order?.workshop_id) return;
+    const workshop = order.Workshop;
+    const floorsCount = workshop?.floors_count ?? 0;
+    const needFloor = floorsCount > 1;
+    const floorId = order.building_floor_id ?? order.floor_id;
+    if (needFloor && !floorId) return;
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setDate(fromDate.getDate() - 14);
+    const from = fromDate.toISOString().slice(0, 10);
+    const toDate = new Date(today);
+    toDate.setDate(toDate.getDate() + 45);
+    const to = toDate.toISOString().slice(0, 10);
+    const params = { workshop_id: order.workshop_id, order_id: order.id, from, to };
+    if (needFloor) params.floor_id = floorId;
+    api.planning.modelTable(params).then(setPlanModelData).catch(() => setPlanModelData(null));
+  };
+
+  const handleSavePlanDay = async () => {
+    if (!planEditModal || !order) return;
+    setPlanSaving(true);
+    setErrorMsg('');
+    try {
+      const payload = {
+        order_id: order.id,
+        workshop_id: order.workshop_id,
+        date: planEditModal.date,
+        planned_qty: planEditModal.planned_qty,
+        actual_qty: planEditModal.actual_qty,
+      };
+      if ((order.Workshop?.floors_count ?? 0) > 1 && order.building_floor_id) {
+        payload.floor_id = order.building_floor_id;
+      }
+      await api.planning.updateDay(payload);
+      setPlanEditModal(null);
+      loadPlanModelData();
+      setSuccessMsg('План сохранён');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err) {
+      setErrorMsg(err.message || 'Ошибка сохранения');
+    } finally {
+      setPlanSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (showEditModal) {
@@ -921,6 +1016,151 @@ export default function OrderDetails() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Планированные модели — после Раскрой */}
+      {order?.workshop_id && (
+        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden mt-4 sm:mt-6 transition-block">
+          <div className="p-4 sm:p-6 border-b border-white/25 dark:border-white/25">
+            <h2 className="text-base sm:text-lg font-medium text-[#ECECEC] dark:text-dark-text">
+              {order.Client?.name || '—'} — {order.title}
+              {(order.Workshop?.floors_count ?? 0) > 1 && order.BuildingFloor?.name && (
+                <span className="text-[#ECECEC]/80 dark:text-dark-text/80 font-normal"> • {order.BuildingFloor.name}</span>
+              )}
+            </h2>
+          </div>
+          {planModelLoading ? (
+            <div className="p-8 text-center text-[#ECECEC]/80 dark:text-dark-text/80">Загрузка...</div>
+          ) : !planModelData?.rows?.length ? (
+            <div className="p-6 text-[#ECECEC]/80 dark:text-dark-text/80">
+              {order.Workshop?.floors_count > 1 && !order.building_floor_id
+                ? 'Распределите заказ по этажу для просмотра плана'
+                : 'Нет данных за выбранный период'}
+            </div>
+          ) : (() => {
+            const rowsWithData = planModelData.rows.filter(
+              (r) => (r.planned_qty ?? 0) > 0 || (r.actual_qty ?? 0) > 0
+            );
+            if (rowsWithData.length === 0) {
+              return (
+                <div className="p-6 text-[#ECECEC]/80 dark:text-dark-text/80">
+                  Нет данных за выбранный период
+                </div>
+              );
+            }
+            const displayRows = rowsWithData;
+            const plannedSum = displayRows.reduce((s, r) => s + (r.planned_qty ?? 0), 0);
+            const actualSum = displayRows.reduce((s, r) => s + (r.actual_qty ?? 0), 0);
+            return (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[400px]">
+                <thead>
+                  <tr className="bg-accent-2/80 dark:bg-dark-800 border-b border-white/25">
+                    <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дата</th>
+                    <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">План</th>
+                    <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Факт</th>
+                    {user?.role !== 'operator' && (
+                      <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Действия</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayRows.map((row) => (
+                    <tr key={row.date} className="border-b border-white/10 dark:border-white/10">
+                      <td className="px-4 py-2 text-[#ECECEC] dark:text-dark-text">{row.date}</td>
+                      <td className="px-4 py-2 text-right text-[#ECECEC]/90 dark:text-dark-text/80">{row.planned_qty}</td>
+                      <td className="px-4 py-2 text-right text-[#ECECEC]/90 dark:text-dark-text/80">{row.actual_qty}</td>
+                      {user?.role !== 'operator' && (
+                        <td className="px-4 py-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPlanEditModal({
+                                order_id: order.id,
+                                order_title: order.title,
+                                date: row.date,
+                                planned_qty: row.planned_qty ?? 0,
+                                actual_qty: row.actual_qty ?? 0,
+                              })
+                            }
+                            className="text-xs px-2 py-1 rounded bg-primary-600 text-white hover:bg-primary-700"
+                          >
+                            Редактировать
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  <tr className="bg-accent-2/50 dark:bg-dark-800 border-t-2 border-white/25 font-bold">
+                    <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text">Итого</td>
+                    <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{plannedSum}</td>
+                    <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{actualSum}</td>
+                    {user?.role !== 'operator' && <td className="px-4 py-3" />}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Модалка редактирования плана по дню */}
+      {planEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPlanEditModal(null)}>
+          <div
+            className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25 animate-page-enter"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
+              Редактировать — {planEditModal.order_title}
+            </h3>
+            <p className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-2">{planEditModal.date}</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-[#ECECEC]/90 mb-1">План</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={planEditModal.planned_qty}
+                  onChange={(e) =>
+                    setPlanEditModal({ ...planEditModal, planned_qty: parseInt(e.target.value, 10) || 0 })
+                  }
+                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-[#ECECEC]/90 mb-1">Факт</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={planEditModal.actual_qty}
+                  onChange={(e) =>
+                    setPlanEditModal({ ...planEditModal, actual_qty: parseInt(e.target.value, 10) || 0 })
+                  }
+                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end mt-6">
+              <button
+                type="button"
+                onClick={() => setPlanEditModal(null)}
+                className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePlanDay}
+                disabled={planSaving}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {planSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
           </div>
         </div>
       )}

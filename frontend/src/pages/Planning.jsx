@@ -8,13 +8,18 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
 
 const FLOOR_1_HINT = '1 этаж — финиш: ОТК, петля, пуговица, метка, упаковка';
 const FLOOR_STORAGE_KEY = 'planning_last_floor';
 const DATE_MODE_STORAGE_KEY = 'planning_date_mode';
+const PLANNING_WORKSHOP_KEY = 'planning_workshop_id';
+const PLANNING_ORDER_KEY = 'planning_order_id';
+const PLANNING_FROM_KEY = 'planning_from';
+const PLANNING_TO_KEY = 'planning_to';
+const PLANNING_FLOW_OPEN_KEY = 'planning_flow_open';
 
 /** Форматирование даты в YYYY-MM-DD */
 function formatDate(d) {
@@ -114,9 +119,17 @@ export default function Planning() {
   const [calcResult, setCalcResult] = useState(null);
   const [calcLoading, setCalcLoading] = useState(false);
   const [applyLoading, setApplyLoading] = useState(false);
+  const [capacityWeek, setCapacityWeek] = useState('1000');
+  const [applySuccess, setApplySuccess] = useState(false);
 
   // Параметры потока (калькулятор)
-  const [flowOpen, setFlowOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(() => {
+    try {
+      return localStorage.getItem(PLANNING_FLOW_OPEN_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [flowForm, setFlowForm] = useState({
     shift_hours: 8,
     product_type: 'dress',
@@ -144,22 +157,42 @@ export default function Planning() {
     api.workshops.list().then(setWorkshops).catch(() => setWorkshops([]));
   }, []);
 
-  // Инициализация из URL (переход из Отчётов)
+  // Инициализация из URL (переход из Отчётов) или из localStorage (после обновления страницы)
   useEffect(() => {
-    if (urlInitDone.current || workshops.length === 0) return;
+    if (workshops.length === 0) return;
     const wid = searchParams.get('workshop_id');
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
     const fid = searchParams.get('floor_id') ?? '';
     const oid = searchParams.get('order_id') ?? '';
-    if (!wid || !workshops.some((x) => String(x.id) === wid)) return;
-    urlInitDone.current = true;
-    skipResetFromUrl.current = true;
-    setWorkshopId(wid);
-    if (fromParam) setFrom(fromParam);
-    if (toParam) setTo(toParam);
-    if (fid) setFloorId(fid);
-    if (oid) setOrderId(oid);
+    if (wid && workshops.some((x) => String(x.id) === wid)) {
+      // URL-параметры заданы — используем их
+      if (!urlInitDone.current) {
+        urlInitDone.current = true;
+        skipResetFromUrl.current = true;
+        setWorkshopId(wid);
+        if (fromParam) setFrom(fromParam);
+        if (toParam) setTo(toParam);
+        if (fid) setFloorId(fid);
+        if (oid) setOrderId(oid);
+      }
+    } else if (!urlInitDone.current) {
+      // Нет URL-параметров — восстанавливаем из localStorage
+      urlInitDone.current = true;
+      try {
+        const savedW = localStorage.getItem(PLANNING_WORKSHOP_KEY);
+        const savedO = localStorage.getItem(PLANNING_ORDER_KEY);
+        const savedFrom = localStorage.getItem(PLANNING_FROM_KEY);
+        const savedTo = localStorage.getItem(PLANNING_TO_KEY);
+        if (savedW && workshops.some((x) => String(x.id) === savedW)) {
+          skipResetFromUrl.current = true;
+          setWorkshopId(savedW);
+          if (savedFrom) setFrom(savedFrom);
+          if (savedTo) setTo(savedTo);
+          if (savedO) setOrderId(savedO);
+        }
+      } catch (_) {}
+    }
   }, [workshops, searchParams]);
 
   // Шаг 2: модели по цеху
@@ -175,7 +208,17 @@ export default function Planning() {
     setModelsLoading(true);
     api.orders
       .byWorkshop(workshopId)
-      .then(setModels)
+      .then((modelsList) => {
+        setModels(modelsList);
+        setOrderId((prev) => {
+          if (skipResetFromUrl.current) {
+            const savedO = localStorage.getItem(PLANNING_ORDER_KEY);
+            if (savedO && modelsList.some((m) => String(m.id) === savedO)) return savedO;
+          }
+          if (prev && !modelsList.some((m) => String(m.id) === prev)) return '';
+          return prev;
+        });
+      })
       .catch(() => setModels([]))
       .finally(() => setModelsLoading(false));
     if (!skipResetFromUrl.current) {
@@ -214,6 +257,23 @@ export default function Planning() {
       localStorage.setItem(DATE_MODE_STORAGE_KEY, dateMode);
     } catch (_) {}
   }, [dateMode]);
+
+  // Сохранение фильтров в localStorage (цех, модель, даты) — чтобы не сбрасывались при обновлении страницы
+  useEffect(() => {
+    try {
+      if (workshopId) localStorage.setItem(PLANNING_WORKSHOP_KEY, workshopId);
+      if (orderId) localStorage.setItem(PLANNING_ORDER_KEY, orderId);
+      if (from) localStorage.setItem(PLANNING_FROM_KEY, from);
+      if (to) localStorage.setItem(PLANNING_TO_KEY, to);
+    } catch (_) {}
+  }, [workshopId, orderId, from, to]);
+
+  // Сохранение состояния блока «Параметры потока»
+  useEffect(() => {
+    try {
+      localStorage.setItem(PLANNING_FLOW_OPEN_KEY, flowOpen ? 'true' : 'false');
+    } catch (_) {}
+  }, [flowOpen]);
 
   // Шаг 4: этажи по цеху (только если floors_count > 1)
   useEffect(() => {
@@ -296,6 +356,7 @@ export default function Planning() {
     setCalcResult(null);
   }, [orderId, from, to, floorId]);
 
+
   const handleCalcCapacity = async () => {
     if (!canLoadTable) return;
     setCalcLoading(true);
@@ -310,6 +371,10 @@ export default function Planning() {
       };
       if (selectedWorkshop?.floors_count > 1) {
         params.floor_id = Number(floorId);
+      }
+      const cap = parseInt(capacityWeek, 10);
+      if (cap >= 1000 && cap <= 5000) {
+        params.capacity_week = cap;
       }
       const result = await api.planning.calcCapacity(params);
       setCalcResult(result);
@@ -332,6 +397,8 @@ export default function Planning() {
         days: calcResult.days,
       });
       setCalcResult(null);
+      setApplySuccess(true);
+      setTimeout(() => setApplySuccess(false), 3000);
       if (canLoadTable) {
         const params = { workshop_id: workshopId, order_id: orderId, from, to };
         if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
@@ -899,9 +966,22 @@ export default function Planning() {
           )}
         </div>
 
-        {/* Кнопка расчёта по мощности */}
+        {/* Расчёт по мощности */}
         {canLoadTable && (
-          <div className="mt-4">
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-sm text-[#ECECEC]/80 mb-1">Мощность в неделю (1000–5000 ед)</label>
+              <input
+                type="number"
+                min="1000"
+                max="5000"
+                value={capacityWeek}
+                onChange={(e) => setCapacityWeek(e.target.value)}
+                placeholder="1000–5000"
+                className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-48"
+              />
+            </div>
             <button
               type="button"
               onClick={handleCalcCapacity}
@@ -910,6 +990,18 @@ export default function Planning() {
             >
               {calcLoading ? 'Расчёт...' : 'Рассчитать автоматически'}
             </button>
+            {canApply && applySuccess && orderId && (
+              <span className="flex items-center gap-2 text-sm">
+                <span className="text-green-400">План применён</span>
+                <Link
+                  to={`/orders/${orderId}`}
+                  className="text-primary-400 hover:text-primary-300 underline"
+                >
+                  Перейти к заказу
+                </Link>
+              </span>
+            )}
+            </div>
           </div>
         )}
       </div>
@@ -922,27 +1014,43 @@ export default function Planning() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
               <div>
                 <span className="text-[#ECECEC]/60">Общее количество заказа</span>
-                <p className="font-medium text-[#ECECEC]">{calcResult.total_quantity}</p>
+                <p className="font-medium text-[#ECECEC]">{calcResult.total_quantity} ед</p>
               </div>
               <div>
-                <span className="text-[#ECECEC]/60">Уже выполнено</span>
-                <p className="font-medium text-[#ECECEC]">{calcResult.actual_total}</p>
+                <span className="text-[#ECECEC]/60">Факт по раскрою (к распределению)</span>
+                <p className="font-medium text-primary-400">{calcResult.cutting_actual_total || calcResult.cutting_planned_total || calcResult.total_quantity} ед</p>
               </div>
               <div>
-                <span className="text-[#ECECEC]/60">Остаток</span>
-                <p className="font-medium text-[#ECECEC]">{calcResult.remaining}</p>
+                <span className="text-[#ECECEC]/60">Уже выполнено (факт)</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.actual_total} ед</p>
+              </div>
+              {calcResult.cutting_actual_total > 0 && (
+                <div>
+                  <span className="text-[#ECECEC]/60">Факт по раскрою</span>
+                  <p className="font-medium text-[#ECECEC]">{calcResult.cutting_actual_total} ед</p>
+                </div>
+              )}
+              <div>
+                <span className="text-[#ECECEC]/60">Остаток (план к выполнению)</span>
+                <p className="font-medium text-[#ECECEC]">{calcResult.remaining} ед</p>
               </div>
               <div>
                 <span className="text-[#ECECEC]/60">Дневная мощность этажа</span>
-                <p className="font-medium text-[#ECECEC]">{calcResult.daily_capacity}</p>
+                <p className="font-medium text-[#ECECEC]">{calcResult.daily_capacity} ед/день</p>
               </div>
+              {calcResult.capacity_week && (
+                <div>
+                  <span className="text-[#ECECEC]/60">Мощность в неделю (задана)</span>
+                  <p className="font-medium text-[#ECECEC]">{calcResult.capacity_week} ед/неделю</p>
+                </div>
+              )}
               <div>
                 <span className="text-[#ECECEC]/60">Количество дней</span>
                 <p className="font-medium text-[#ECECEC]">{calcResult.working_days}</p>
               </div>
               <div>
                 <span className="text-[#ECECEC]/60">Общая мощность периода</span>
-                <p className="font-medium text-[#ECECEC]">{calcResult.total_capacity}</p>
+                <p className="font-medium text-[#ECECEC]">{calcResult.total_capacity} ед</p>
               </div>
               <div>
                 <span className="text-[#ECECEC]/60">% загрузки</span>
@@ -966,7 +1074,7 @@ export default function Planning() {
                     <thead>
                       <tr className="border-b border-white/20">
                         <th className="text-left px-4 py-2 text-sm font-medium text-[#ECECEC]/90">Дата</th>
-                        <th className="text-right px-4 py-2 text-sm font-medium text-[#ECECEC]/90">Предложенный план</th>
+                        <th className="text-right px-4 py-2 text-sm font-medium text-[#ECECEC]/90">Предложенный план (ед)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1146,3 +1254,5 @@ export default function Planning() {
     </div>
   );
 }
+
+
