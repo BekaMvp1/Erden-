@@ -4,6 +4,10 @@
 
 require('dotenv').config();
 
+if (process.env.NODE_ENV === 'production') {
+  console.log('PRODUCTION DATABASE_URL:', process.env.DATABASE_URL);
+}
+
 const dbUrl = process.env.DATABASE_URL || '';
 const isLocalhost = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
 

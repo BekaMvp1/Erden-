@@ -203,6 +203,9 @@ router.post('/', async (req, res, next) => {
  */
 router.get('/', async (req, res, next) => {
   try {
+    const ordersCount = await db.Order.count();
+    console.log('Orders count in DB:', ordersCount);
+
     const { status_id, floor_id, client_id, search, page, limit } = req.query;
     const andConditions = [];
 
