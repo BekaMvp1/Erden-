@@ -35,7 +35,7 @@ const cloudDb = new Sequelize(CLOUD_URL, {
   dialectOptions: isCloud ? { ssl: { rejectUnauthorized: false } } : {},
 });
 
-// Порядок таблиц (с учётом foreign keys)
+// Порядок таблиц (с учётом foreign keys): справочники → orders → order_*
 const TABLES = [
   'clients',
   'colors',
@@ -53,7 +53,7 @@ const TABLES = [
   'order_variants',
   'order_operations',
   'order_operation_variants',
-  'order_floor_distribution',
+  'order_floor_distributions',
 ];
 
 async function copyTable(tableName) {
@@ -66,7 +66,10 @@ async function copyTable(tableName) {
     const columns = Object.keys(rows[0]);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
     const colNames = columns.map((c) => `"${c}"`).join(', ');
-    const insertSql = `INSERT INTO ${tableName} (${colNames}) VALUES (${placeholders})`;
+    const hasId = columns.includes('id');
+    const insertSql = hasId
+      ? `INSERT INTO ${tableName} (${colNames}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`
+      : `INSERT INTO ${tableName} (${colNames}) VALUES (${placeholders})`;
     let inserted = 0;
     for (const row of rows) {
       const values = columns.map((c) => row[c]);
@@ -80,6 +83,9 @@ async function copyTable(tableName) {
       }
     }
     console.log(`  ${tableName}: ${inserted}/${rows.length}`);
+    if (tableName === 'orders') {
+      console.log('Orders transferred:', inserted);
+    }
     return inserted;
   } catch (err) {
     console.error(`  ${tableName}: ошибка`, err.message);
