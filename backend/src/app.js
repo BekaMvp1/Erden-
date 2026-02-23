@@ -257,12 +257,16 @@ app.use((req, res) => {
 
 // Обработка ошибок
 app.use((err, req, res, next) => {
-  console.error("Ошибка:", err);
+  console.error("Ошибка:", err?.name, err?.message, err?.errors);
   const status = err.status || 500;
-  const response = {
-    error: err.message || "Внутренняя ошибка сервера",
-  };
-  // В режиме разработки — полная информация об ошибке
+  let errorMsg = err.message || "Внутренняя ошибка сервера";
+  if (err.name === "SequelizeValidationError" && err.errors?.length) {
+    errorMsg = err.errors.map((e) => e.message || `${e.path}: ${e.value}`).join("; ");
+  }
+  if (err.name === "SequelizeUniqueConstraintError") {
+    errorMsg = "Запись с такими данными уже существует";
+  }
+  const response = { error: errorMsg };
   if (process.env.NODE_ENV !== "production") {
     response.stack = err.stack;
     response.name = err.name;

@@ -107,13 +107,21 @@ router.post('/clients', async (req, res, next) => {
     if (!['admin', 'manager'].includes(req.user?.role)) {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
-    const { name } = req.body;
-    if (!name || !String(name).trim()) {
+    const { name } = req.body || {};
+    const nameStr = name != null ? String(name).trim() : '';
+    if (!nameStr) {
       return res.status(400).json({ error: 'Укажите название клиента' });
     }
-    const client = await db.Client.create({ name: String(name).trim() });
+    const client = await db.Client.create({ name: nameStr });
     res.status(201).json(client);
   } catch (err) {
+    if (err.name === 'SequelizeValidationError' && err.errors?.length) {
+      const msg = err.errors.map((e) => e.message || e.path).join('; ');
+      return res.status(400).json({ error: msg || 'Ошибка валидации' });
+    }
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ error: 'Клиент с таким названием уже существует' });
+    }
     next(err);
   }
 });
