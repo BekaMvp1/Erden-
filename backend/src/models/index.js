@@ -60,6 +60,7 @@ const db = {
   OrderVariant: require('./OrderVariant')(sequelize, Sequelize.DataTypes),
   Workshop: require('./Workshop')(sequelize, Sequelize.DataTypes),
   ProductionPlanDay: require('./ProductionPlanDay')(sequelize, Sequelize.DataTypes),
+  SyncQueue: require('./SyncQueue')(sequelize, Sequelize.DataTypes),
 };
 
 // Связи

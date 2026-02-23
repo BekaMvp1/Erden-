@@ -36,6 +36,11 @@ async function start() {
     }
   }
 
+  if (process.env.SYNC_TO_CLOUD === 'true' && process.env.CLOUD_DATABASE_URL) {
+    const { startSyncWorker } = require('./services/cloudSync');
+    startSyncWorker();
+  }
+
   const port = process.env.PORT || config.port;
   app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);

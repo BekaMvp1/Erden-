@@ -99,6 +99,26 @@ router.get('/clients', async (req, res, next) => {
 });
 
 /**
+ * POST /api/references/clients
+ * Добавление клиента (admin/manager)
+ */
+router.post('/clients', async (req, res, next) => {
+  try {
+    if (!['admin', 'manager'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const { name } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Укажите название клиента' });
+    }
+    const client = await db.Client.create({ name: String(name).trim() });
+    res.status(201).json(client);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/references/operations
  */
 router.get('/operations', async (req, res, next) => {

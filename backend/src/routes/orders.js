@@ -6,6 +6,7 @@ const express = require('express');
 const { Op } = require('sequelize');
 const db = require('../models');
 const { logAudit } = require('../utils/audit');
+const { trySyncOrderToCloud, queueOrderForSync } = require('../services/cloudSync');
 
 const router = express.Router();
 
@@ -181,6 +182,17 @@ router.post('/', async (req, res, next) => {
     }
 
     await logAudit(req.user.id, 'CREATE', 'order', order.id);
+
+    if (process.env.SYNC_TO_CLOUD === 'true' && process.env.CLOUD_DATABASE_URL) {
+      const synced = await trySyncOrderToCloud(order);
+      if (!synced) {
+        try {
+          await queueOrderForSync(order, 'Initial sync failed');
+        } catch (qErr) {
+          console.error('Queue order for sync failed:', qErr.message);
+        }
+      }
+    }
 
     const full = await db.Order.findByPk(order.id, {
       include: [

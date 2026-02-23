@@ -300,6 +300,11 @@ export const api = {
         body: JSON.stringify({ name }),
       }),
     clients: () => request('/api/references/clients'),
+    addClient: (name) =>
+      request('/api/references/clients', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
     operations: () => request('/api/references/operations'),
     addOperation: (data) =>
       request('/api/references/operations', {

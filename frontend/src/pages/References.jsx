@@ -25,6 +25,8 @@ export default function References() {
   const [addingBuildingFloor, setAddingBuildingFloor] = useState(false);
   const [newCuttingTypeName, setNewCuttingTypeName] = useState('');
   const [addingCuttingType, setAddingCuttingType] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [addingClient, setAddingClient] = useState(false);
   const [newOperation, setNewOperation] = useState({ name: '', norm_minutes: '', category: 'SEWING', default_floor_id: '', locked_to_floor: false });
   const [addingOperation, setAddingOperation] = useState(false);
   const [deletingOperationId, setDeletingOperationId] = useState(null);
@@ -102,6 +104,22 @@ export default function References() {
       alert(err.message);
     } finally {
       setAddingCuttingType(false);
+    }
+  };
+
+  const handleAddClient = async (e) => {
+    e.preventDefault();
+    const name = newClientName.trim();
+    if (!name) return;
+    setAddingClient(true);
+    try {
+      await api.references.addClient(name);
+      setNewClientName('');
+      load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setAddingClient(false);
     }
   };
 
@@ -217,6 +235,12 @@ export default function References() {
   };
 
   const getTableColumns = () => {
+    if (tab === 'clients' && data.length > 0) {
+      return [
+        { key: 'id', label: 'ID' },
+        { key: 'name', label: 'Название' },
+      ];
+    }
     if (tab === 'cutting-types' && data.length > 0) {
       return [
         { key: 'id', label: 'ID' },
@@ -341,6 +365,24 @@ export default function References() {
           />
           <button type="submit" disabled={addingBuildingFloor || !newBuildingFloorName.trim()} className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
             {addingBuildingFloor ? 'Добавление...' : 'Добавить'}
+          </button>
+        </form>
+      )}
+      {tab === 'clients' && ['admin', 'manager'].includes(user?.role) && (
+        <form onSubmit={handleAddClient} className="mb-4 flex gap-2">
+          <input
+            type="text"
+            value={newClientName}
+            onChange={(e) => setNewClientName(e.target.value)}
+            placeholder="Добавить клиента (например: ООО Ромашка)"
+            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[200px]"
+          />
+          <button
+            type="submit"
+            disabled={addingClient || !newClientName.trim()}
+            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+          >
+            {addingClient ? 'Добавление...' : 'Добавить'}
           </button>
         </form>
       )}
