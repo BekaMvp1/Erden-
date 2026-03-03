@@ -10,15 +10,42 @@ const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
 
-const VALID_UNITS = ['РУЛОН', 'КГ', 'ТОННА'];
+const VALID_UNITS = ['РУЛОН', 'КГ', 'ТОННА', 'МЕТР', 'ШТ'];
 const VALID_STATUSES = ['Ожидает закуп', 'Закуплено', 'Частично', 'Отменено'];
+const API_STATUS_TO_DB = {
+  draft: 'Ожидает закуп',
+  sent: 'Частично',
+  received: 'Закуплено',
+  canceled: 'Отменено',
+};
+const DB_STATUS_TO_API = {
+  'Ожидает закуп': 'draft',
+  'Частично': 'sent',
+  'Закуплено': 'received',
+  'Отменено': 'canceled',
+};
+
+/**
+ * Оператор может только просматривать закуп
+ */
+router.use((req, res, next) => {
+  if (req.user?.role === 'operator' && req.method !== 'GET') {
+    return res.status(403).json({ error: 'Оператор может только просматривать закуп' });
+  }
+  return next();
+});
 
 /**
  * Проверка доступа к закупу по заказу (для технолога — только свой этаж)
  */
 async function checkProcurementAccess(req, orderId) {
   if (['admin', 'manager'].includes(req.user.role)) return true;
-  if (req.user.role === 'operator') return false;
+  if (req.user.role === 'operator' && req.user.Sewer) {
+    const myOps = await db.OrderOperation.count({
+      where: { order_id: orderId, sewer_id: req.user.Sewer.id },
+    });
+    return myOps > 0;
+  }
   if (req.user.role === 'technologist' && req.allowedFloorId) {
     const order = await db.Order.findByPk(orderId, { attributes: ['floor_id', 'building_floor_id'] });
     if (!order) return false;
@@ -29,98 +56,85 @@ async function checkProcurementAccess(req, orderId) {
 }
 
 /**
- * GET /api/procurement?order_id= | ?awaiting=1 | ?list=1
- * order_id — закуп для конкретного заказа
- * awaiting=1 — первый закуп со статусом «Ожидает закуп»
- * list=1 — список всех закупов (для отображения списком)
+ * GET /api/procurement
+ * Режим списка для страницы «Закуп»: readonly + фильтры
  */
 router.get('/', async (req, res, next) => {
   try {
-    const orderId = req.query.order_id;
-    const awaiting = req.query.awaiting === '1';
-    const list = req.query.list === '1';
-
-    if (list) {
-      const requests = await db.ProcurementRequest.findAll({
-        include: [
-          { model: db.ProcurementItem, as: 'ProcurementItems' },
-          {
-            model: db.Order,
-            as: 'Order',
-            include: [
-              { model: db.Client, as: 'Client' },
-              { model: db.OrderStatus, as: 'OrderStatus' },
-              { model: db.OrderVariant, as: 'OrderVariants' },
-            ],
-          },
-        ],
-        order: [['created_at', 'DESC']],
-      });
-      const filtered = [];
-      for (const r of requests) {
-        const hasAccess = await checkProcurementAccess(req, r.order_id);
-        if (hasAccess) filtered.push(r);
-      }
-      return res.json(filtered);
+    const { status, q, date_from, date_to } = req.query;
+    const where = {};
+    const requestedStatus = API_STATUS_TO_DB[status] || status;
+    if (requestedStatus && VALID_STATUSES.includes(requestedStatus)) {
+      where.status = requestedStatus;
+    }
+    if (date_from || date_to) {
+      where.due_date = {};
+      if (date_from) where.due_date[Op.gte] = date_from;
+      if (date_to) where.due_date[Op.lte] = date_to;
     }
 
-    let request;
+    const ordersWhere = {};
+    if (q && String(q).trim()) {
+      const term = `%${String(q).trim()}%`;
+      ordersWhere[Op.or] = [
+        { title: { [Op.iLike]: term } },
+        { tz_code: { [Op.iLike]: term } },
+        { model_name: { [Op.iLike]: term } },
+        { '$Order->Client.name$': { [Op.iLike]: term } },
+      ];
+    }
 
-    if (orderId) {
-      const hasAccess = await checkProcurementAccess(req, orderId);
-      if (!hasAccess) {
-        return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
-      }
-      request = await db.ProcurementRequest.findOne({
-        where: { order_id: orderId },
-        include: [
-        { model: db.ProcurementItem, as: 'ProcurementItems' },
+    const requests = await db.ProcurementRequest.findAll({
+      where,
+      include: [
+        { model: db.ProcurementItem, as: 'ProcurementItems', attributes: ['total'] },
         {
           model: db.Order,
           as: 'Order',
+          where: ordersWhere,
           include: [
-            { model: db.Client, as: 'Client' },
-            { model: db.OrderStatus, as: 'OrderStatus' },
-            { model: db.OrderVariant, as: 'OrderVariants' },
+            { model: db.Client, as: 'Client', attributes: ['name'] },
+            { model: db.OrderVariant, as: 'OrderVariants', attributes: ['color', 'quantity'] },
           ],
         },
       ],
+      order: [['created_at', 'DESC']],
     });
-    } else if (awaiting) {
-      const where = { status: 'Ожидает закуп' };
-      const include = [
-        { model: db.ProcurementItem, as: 'ProcurementItems' },
-        {
-          model: db.Order,
-          as: 'Order',
-          include: [
-            { model: db.Client, as: 'Client' },
-            { model: db.OrderStatus, as: 'OrderStatus' },
-            { model: db.OrderVariant, as: 'OrderVariants' },
-          ],
+
+    const out = [];
+    for (const r of requests) {
+      const hasAccess = await checkProcurementAccess(req, r.order_id);
+      if (!hasAccess) continue;
+
+      const colorsMap = (r.Order?.OrderVariants || []).reduce((acc, variant) => {
+        const key = String(variant.color || '').trim();
+        if (!key) return acc;
+        acc[key] = (acc[key] || 0) + Number(variant.quantity || 0);
+        return acc;
+      }, {});
+      const colorsSummary = Object.entries(colorsMap)
+        .map(([color, qty]) => `${color}: ${qty}`)
+        .join(', ');
+      const totalItemsSum = (r.ProcurementItems || []).reduce((sum, item) => sum + Number(item.total || 0), 0);
+      const totalSum = Number(r.total_sum || totalItemsSum || 0);
+
+      out.push({
+        order_id: r.order_id,
+        tz_code: r.Order?.tz_code || '',
+        model_name: r.Order?.model_name || '',
+        title: r.Order?.title || '',
+        client_name: r.Order?.Client?.name || '—',
+        colors_summary: colorsSummary || '—',
+        procurement: {
+          status: DB_STATUS_TO_API[r.status] || 'draft',
+          status_label: r.status,
+          due_date: r.due_date || null,
+          total_sum: Number(totalSum.toFixed(2)),
         },
-      ];
-      const requests = await db.ProcurementRequest.findAll({
-        where,
-        include,
-        order: [['created_at', 'ASC']],
       });
-      for (const r of requests) {
-        const hasAccess = await checkProcurementAccess(req, r.order_id);
-        if (hasAccess) {
-          request = r;
-          break;
-        }
-      }
-    } else {
-      return res.status(400).json({ error: 'Укажите order_id, awaiting=1 или list=1' });
     }
 
-    if (!request) {
-      return res.status(404).json({ error: 'Заявка на закуп не найдена' });
-    }
-
-    res.json(request);
+    res.json(out);
   } catch (err) {
     next(err);
   }

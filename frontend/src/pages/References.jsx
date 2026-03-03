@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
+import { Chip, NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
 
 export default function References() {
   const { user } = useAuth();
@@ -308,50 +309,49 @@ export default function References() {
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-        <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Справочники</h1>
-        <button
+        <h1 className="text-2xl font-bold text-neon-text">Справочники</h1>
+        <NeonButton
           type="button"
           onClick={() => load()}
           disabled={loading}
-          className="p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3 disabled:opacity-50"
+          variant="secondary"
+          className="p-2"
           title="Обновить"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-        </button>
+        </NeonButton>
       </div>
 
       <div className="flex gap-2 mb-6 flex-wrap">
         {tabs.map((t) => (
-          <button
+          <Chip
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-lg ${
-              tab === t.id ? 'bg-primary-600 text-white' : 'bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text'
-            }`}
+            active={tab === t.id}
+            className="px-4 py-2"
           >
             {t.label}
-          </button>
+          </Chip>
         ))}
       </div>
 
       {tab === 'floors' && ['admin', 'manager'].includes(user?.role) && (
         <form onSubmit={handleAddFloor} className="mb-4 flex gap-2">
-          <input
+          <NeonInput
             type="text"
             value={newFloorName}
             onChange={(e) => setNewFloorName(e.target.value)}
             placeholder="Добавить цех пошива (например: Цех №1)"
-            className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[200px]"
+            className="min-w-[200px]"
           />
-          <button
+          <NeonButton
             type="submit"
             disabled={addingFloor || !newFloorName.trim()}
-            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
           >
             {addingFloor ? 'Добавление...' : 'Добавить'}
-          </button>
+          </NeonButton>
         </form>
       )}
       {tab === 'building-floors' && ['admin', 'manager'].includes(user?.role) && (
@@ -563,7 +563,7 @@ export default function References() {
         </form>
       )}
 
-      <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden">
+      <NeonCard className="overflow-hidden p-0">
         {loading ? (
           <div className="p-8 text-center text-[#ECECEC]/80 dark:text-dark-text/80">Загрузка...</div>
         ) : Array.isArray(data) && data.length > 0 ? (
@@ -602,7 +602,7 @@ export default function References() {
         ) : (
           <div className="p-8 text-[#ECECEC]/80 dark:text-dark-text/80">Нет данных</div>
         )}
-      </div>
+      </NeonCard>
     </div>
   );
 }

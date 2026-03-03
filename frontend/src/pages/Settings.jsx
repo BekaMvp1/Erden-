@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useFont } from '../context/FontContext';
 import { api } from '../api';
+import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -72,7 +73,7 @@ export default function Settings() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text mb-6">Настройки</h1>
+      <h1 className="text-2xl font-bold text-neon-text mb-6">Настройки</h1>
 
       {successMsg && (
         <div className="mb-4 p-4 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30">
@@ -87,7 +88,7 @@ export default function Settings() {
 
       <div className="space-y-8 max-w-2xl">
         {/* Шрифт */}
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 p-6 transition-block">
+        <NeonCard className="p-6 transition-block">
           <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
             Шрифт интерфейса
           </h2>
@@ -96,78 +97,78 @@ export default function Settings() {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {fonts.map((font) => (
-              <button
+              <NeonButton
                 key={font.id}
                 type="button"
                 onClick={() => setFontId(font.id)}
-                className={`px-4 py-3 rounded-lg border text-left transition-colors ${
+                variant={fontId === font.id ? 'primary' : 'secondary'}
+                className={`px-4 py-3 text-left transition-colors ${
                   fontId === font.id
-                    ? 'bg-primary-600/30 border-primary-500 text-[#ECECEC] dark:text-dark-text'
-                    : 'bg-accent-2/50 dark:bg-dark-800 border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/20 dark:hover:bg-dark-2'
+                    ? 'text-black'
+                    : 'text-neon-text'
                 }`}
                 style={font.id !== 'system' ? { fontFamily: font.value } : {}}
               >
                 {font.name}
-              </button>
+              </NeonButton>
             ))}
           </div>
-        </div>
+        </NeonCard>
 
         {/* Добавление технолога (admin/manager) */}
         {canManageTechnologists && (
-          <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 p-6 transition-block">
+          <NeonCard className="p-6 transition-block">
             <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
               Добавить технолога
             </h2>
             <form onSubmit={handleAddTechnologist} className="flex flex-wrap gap-2 items-end mb-4">
-              <input
+              <NeonInput
                 type="text"
                 value={newTechnologist.name}
                 onChange={(e) => setNewTechnologist({ ...newTechnologist, name: e.target.value })}
                 placeholder="ФИО"
-                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[140px]"
+                className="min-w-[140px]"
               />
-              <input
+              <NeonInput
                 type="email"
                 value={newTechnologist.email}
                 onChange={(e) => setNewTechnologist({ ...newTechnologist, email: e.target.value })}
                 placeholder="Email"
-                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[160px]"
+                className="min-w-[160px]"
               />
-              <input
+              <NeonInput
                 type="password"
                 value={newTechnologist.password}
                 onChange={(e) => setNewTechnologist({ ...newTechnologist, password: e.target.value })}
                 placeholder="Пароль (мин. 6)"
-                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[120px]"
+                className="min-w-[120px]"
               />
-              <select
+              <NeonSelect
                 value={newTechnologist.floor_id}
                 onChange={(e) => setNewTechnologist({ ...newTechnologist, floor_id: e.target.value })}
-                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[140px]"
+                className="min-w-[140px]"
               >
                 <option value="">Цех пошива</option>
                 {floors.map((f) => (
                   <option key={f.id} value={f.id}>{f.name}</option>
                 ))}
-              </select>
-              <select
+              </NeonSelect>
+              <NeonSelect
                 value={newTechnologist.building_floor_id}
                 onChange={(e) => setNewTechnologist({ ...newTechnologist, building_floor_id: e.target.value })}
-                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[140px]"
+                className="min-w-[140px]"
               >
                 <option value="">Этаж</option>
                 {buildingFloors.map((f) => (
                   <option key={f.id} value={f.id}>{f.name}</option>
                 ))}
-              </select>
-              <button
+              </NeonSelect>
+              <NeonButton
                 type="submit"
                 disabled={addingTechnologist || !newTechnologist.name?.trim() || !newTechnologist.email?.trim() || !newTechnologist.password || newTechnologist.password.length < 6 || !newTechnologist.floor_id || !newTechnologist.building_floor_id}
-                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
               >
                 {addingTechnologist ? 'Добавление...' : 'Добавить'}
-              </button>
+              </NeonButton>
             </form>
             {technologists.length > 0 && (
               <div className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80">
@@ -175,50 +176,51 @@ export default function Settings() {
                 {technologists.map((t) => t.User?.name || t.name || `ID ${t.id}`).join(', ')}
               </div>
             )}
-          </div>
+          </NeonCard>
         )}
 
         {/* Удаление (только admin) */}
         {isAdmin && (
-          <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-red-500/30 p-6">
+          <NeonCard className="p-6 border border-red-500/30">
             <h2 className="text-lg font-semibold text-red-400 mb-4">Опасная зона</h2>
             <p className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-4">
               Удалить все заказы из системы. Операция необратима. Справочники (клиенты, этажи, операции и т.д.) не удаляются.
             </p>
-            <button
+            <NeonButton
               type="button"
               onClick={() => setShowDeleteConfirm(true)}
               disabled={deleting}
-              className="px-4 py-2 rounded-lg bg-red-500/30 text-red-400 hover:bg-red-500/40 font-medium disabled:opacity-50"
+              variant="secondary"
+              className="text-red-400 border-red-500/40 hover:bg-red-500/20"
             >
               {deleting ? 'Удаление...' : 'Удалить все заказы'}
-            </button>
-          </div>
+            </NeonButton>
+          </NeonCard>
         )}
       </div>
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full mx-4 border border-red-500/30">
+          <div className="card-neon rounded-card p-6 max-w-md w-full mx-4 border border-red-500/30">
             <h2 className="text-lg font-semibold text-red-400 mb-4">Подтверждение</h2>
             <p className="text-[#ECECEC]/90 dark:text-dark-text/80 mb-6">
               Вы уверены, что хотите удалить все заказы? Это действие нельзя отменить.
             </p>
             <div className="flex gap-3 justify-end">
-              <button
+              <NeonButton
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
+                variant="secondary"
               >
                 Отмена
-              </button>
-              <button
+              </NeonButton>
+              <NeonButton
                 type="button"
                 onClick={handleDeleteAll}
-                className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-medium hover:bg-red-500"
+                className="bg-red-500/80 hover:bg-red-500 text-white"
               >
                 Удалить всё
-              </button>
+              </NeonButton>
             </div>
           </div>
         </div>

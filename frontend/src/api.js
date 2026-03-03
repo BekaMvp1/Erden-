@@ -82,13 +82,15 @@ export const api = {
       }),
     deletePhoto: (id, index) =>
       request(`/api/orders/${id}/photos/${index}`, { method: 'DELETE' }),
-  },
-  planning: {
-    assign: (data) =>
-      request('/api/planning/assign', {
-        method: 'POST',
+    getProcurement: (id) =>
+      request(`/api/orders/${id}/procurement`),
+    updateProcurement: (id, data) =>
+      request(`/api/orders/${id}/procurement`, {
+        method: 'PUT',
         body: JSON.stringify(data),
       }),
+  },
+  planning: {
     updateOperation: (id, data) =>
       request(`/api/planning/operations/${id}`, {
         method: 'PUT',
@@ -156,6 +158,12 @@ export const api = {
         body: JSON.stringify({ floor_id: floorId }),
       }),
   },
+  board: {
+    getOrders: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/board/orders${q ? `?${q}` : ''}`);
+    },
+  },
   reports: {
     daily: (date) => request(`/api/reports/daily?date=${date}`),
     weekly: (from, to) => request(`/api/reports/weekly?from=${from}&to=${to}`),
@@ -212,9 +220,10 @@ export const api = {
       }),
   },
   procurement: {
-    get: (orderId) => request(`/api/procurement?order_id=${orderId}`),
-    getAwaiting: () => request('/api/procurement?awaiting=1'),
-    list: () => request('/api/procurement?list=1'),
+    list: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/procurement${q ? `?${q}` : ''}`);
+    },
     addItem: (requestId, data) =>
       request(`/api/procurement/${requestId}/items`, {
         method: 'POST',

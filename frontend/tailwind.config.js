@@ -10,9 +10,22 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',
         'slide-up': 'slideUp 0.35s ease-out',
+      },
+      borderRadius: {
+        card: '24px',
+        chip: '999px',
+        btn: '16px',
+      },
+      boxShadow: {
+        outer: '0 18px 60px rgba(0,0,0,.55)',
+        soft: 'inset 0 1px 0 rgba(255,255,255,.04), inset 0 -20px 60px rgba(0,0,0,.6)',
+        neon: '0 0 0 1px rgba(199,255,26,.25), 0 0 25px rgba(199,255,26,.12)',
       },
       keyframes: {
         fadeIn: {
@@ -28,6 +41,20 @@ export default {
         '250': '250ms',
       },
       colors: {
+        neon: {
+          bg: 'var(--bg)',
+          bg2: 'var(--bg2)',
+          surface: 'var(--surface)',
+          surface2: 'var(--surface2)',
+          text: 'var(--text)',
+          muted: 'var(--muted)',
+          border: 'var(--border)',
+          accent: 'var(--accent)',
+          accent2: 'var(--accent2)',
+          danger: 'var(--danger)',
+          warn: 'var(--warn)',
+          success: 'var(--success)',
+        },
         primary: {
           400: 'var(--color-primary-400)',
           500: 'var(--color-primary-500)',

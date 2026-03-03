@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
+import { NeonButton, NeonInput, NeonSelect } from '../components/ui';
 
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
@@ -17,7 +18,6 @@ export default function CreateOrder() {
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [workshops, setWorkshops] = useState([]);
-  const [availableSizes, setAvailableSizes] = useState([]);
   const [colorSuggestions, setColorSuggestions] = useState([]);
   const [colorDropdownOpen, setColorDropdownOpen] = useState(false);
   const colorInputRef = useRef(null);
@@ -25,8 +25,10 @@ export default function CreateOrder() {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     client_id: '',
-    title: '',
+    tz_code: '',
+    model_name: '',
     total_quantity: '',
+    start_date: '',
     deadline: '',
     comment: '',
     planned_month: '',
@@ -50,7 +52,6 @@ export default function CreateOrder() {
   const loadRefs = useCallback(() => {
     api.references.clients().then(setClients);
     api.workshops.list().then(setWorkshops);
-    api.sizes.list().then((data) => setAvailableSizes(data || []));
   }, []);
 
   useEffect(() => {
@@ -215,8 +216,11 @@ export default function CreateOrder() {
       });
       const order = await api.orders.create({
         client_id: parseInt(form.client_id, 10),
-        title: form.title,
+        tz_code: form.tz_code,
+        model_name: form.model_name,
+        title: `${form.tz_code} — ${form.model_name}`,
         total_quantity: totalQty,
+        start_date: form.start_date || undefined,
         deadline: form.deadline,
         comment: form.comment || undefined,
         planned_month: form.planned_month,
@@ -242,17 +246,16 @@ export default function CreateOrder() {
 
   return (
     <div>
-      <h1 className="text-xl sm:text-2xl font-bold text-[#ECECEC] dark:text-dark-text mb-4 sm:mb-6">Создать заказ</h1>
+      <h1 className="text-xl sm:text-2xl font-bold text-neon-text mb-4 sm:mb-6">Создать заказ</h1>
       <form
         onSubmit={handleSubmit}
-        className="max-w-4xl mx-auto bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 p-4 sm:p-6 space-y-4 transition-block"
+        className="max-w-4xl mx-auto card-neon rounded-card p-4 sm:p-6 space-y-4 transition-block"
       >
         <div>
           <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Клиент</label>
-          <select
+          <NeonSelect
             value={form.client_id}
             onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
             required
           >
             <option value="">Выберите клиента</option>
@@ -261,39 +264,73 @@ export default function CreateOrder() {
                 {c.name}
               </option>
             ))}
-          </select>
+          </NeonSelect>
         </div>
-        <div>
-          <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Название заказа</label>
-          <input
-            type="text"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
-            required
-          />
+        <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-4">
+          <div>
+            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">ТЗ</label>
+            <NeonInput
+              type="text"
+              value={form.tz_code}
+              onChange={(e) => setForm({ ...form, tz_code: e.target.value })}
+              maxLength={10}
+              required
+            />
+            {/* <p className="mt-1 text-xs text-[#ECECEC]/60">Максимум 10 символов</p> */}
+          </div>
+          <div>
+            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Название модели</label>
+            <NeonInput
+              type="text"
+              value={form.model_name}
+              onChange={(e) => setForm({ ...form, model_name: e.target.value })}
+              required
+            />
+          </div>
+          <p className="md:col-span-2 mt-1 text-xs text-[#ECECEC]/70">
+            Получится: {(form.tz_code || '...').trim()} — {(form.model_name || '...').trim()}
+          </p>
         </div>
         <div>
           <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Общее количество</label>
-          <input
+          <NeonInput
             type="number"
             min="1"
             value={form.total_quantity}
             onChange={(e) => setForm({ ...form, total_quantity: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
             required
           />
         </div>
-        <div>
-          <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Дедлайн</label>
-          <input
-            type="date"
-            min={today}
-            value={form.deadline}
-            onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
-            required
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-xl border-[0.5px] border-white/20 bg-accent-2/20 p-3">
+            <label className="flex items-center gap-2 text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">
+              <svg className="w-4 h-4 text-[#ECECEC]/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
+              </svg>
+              Поступление заказа
+            </label>
+            <NeonInput
+              type="date"
+              min={today}
+              value={form.start_date}
+              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+            />
+          </div>
+          <div className="rounded-xl border-[0.5px] border-white/20 bg-accent-2/20 p-3">
+            <label className="flex items-center gap-2 text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">
+              <svg className="w-4 h-4 text-[#ECECEC]/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Дедлайн
+            </label>
+            <NeonInput
+              type="date"
+              min={today}
+              value={form.deadline}
+              onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+              required
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Комментарий</label>
@@ -310,10 +347,9 @@ export default function CreateOrder() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Месяц плана</label>
-              <select
+              <NeonSelect
                 value={form.planned_month}
                 onChange={(e) => setForm({ ...form, planned_month: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                 required
               >
                 <option value="">Выберите месяц</option>
@@ -322,14 +358,13 @@ export default function CreateOrder() {
                     {m}
                   </option>
                 ))}
-              </select>
+              </NeonSelect>
             </div>
             <div>
               <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Цех</label>
-              <select
+              <NeonSelect
                 value={form.workshop_id}
                 onChange={(e) => setForm({ ...form, workshop_id: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                 required
               >
                 <option value="">Выберите цех</option>
@@ -338,7 +373,7 @@ export default function CreateOrder() {
                     {w.name}
                   </option>
                 ))}
-              </select>
+              </NeonSelect>
             </div>
           </div>
         </div>
@@ -631,20 +666,19 @@ export default function CreateOrder() {
         </div>
 
         <div className="flex gap-3 pt-2">
-          <button
+          <NeonButton
             type="submit"
             disabled={loading || !isValid}
-            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Создание...' : 'Создать заказ'}
-          </button>
-          <button
+          </NeonButton>
+          <NeonButton
             type="button"
             onClick={() => navigate(-1)}
-            className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3"
+            variant="secondary"
           >
             Отмена
-          </button>
+          </NeonButton>
         </div>
       </form>
     </div>

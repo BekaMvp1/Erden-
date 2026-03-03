@@ -18,7 +18,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
     },
     unit: {
-      type: DataTypes.ENUM('РУЛОН', 'КГ', 'ТОННА'),
+      type: DataTypes.STRING(20),
       allowNull: false,
     },
     quantity: {

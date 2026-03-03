@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { Chip, NeonCard } from '../components/ui';
 
 const FLOORS = [
   { id: 1, name: 'Финиш / ОТК' },
@@ -57,7 +58,7 @@ function EditVariantsModal({ task, onClose, onSave }) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4" onClick={onClose}>
       <div
-        className="bg-accent-3 dark:bg-dark-900 rounded-xl border border-white/25 p-4 sm:p-6 max-w-3xl w-full max-h-[90vh] overflow-auto"
+        className="card-neon rounded-card p-4 sm:p-6 max-w-3xl w-full max-h-[90vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
@@ -183,25 +184,24 @@ export default function FloorTasks() {
   return (
     <div>
       <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-4 sm:mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Задачи по операциям</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-neon-text">Задачи по операциям</h1>
         {tasks.length > 0 && <PrintButton />}
       </div>
 
       <div className="no-print flex flex-wrap gap-2 mb-4">
         {FLOORS.map((f) => (
-          <button
+          <Chip
             key={f.id}
             onClick={() => setFloorId(f.id)}
-            className={`px-4 py-2 rounded-lg ${
-              floorId === f.id ? 'bg-primary-600 text-white' : 'bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text'
-            }`}
+            active={floorId === f.id}
+            className="px-4 py-2"
           >
             {f.name}
-          </button>
+          </Chip>
         ))}
       </div>
 
-      <div className="print-area rounded-xl border border-white/25 dark:border-white/25 overflow-hidden overflow-x-auto">
+      <NeonCard className="print-area rounded-card overflow-hidden overflow-x-auto p-0">
         <h1 className="print-title print-only">
           Задачи по операциям — {FLOORS.find((f) => f.id === floorId)?.name || 'Этаж'}
         </h1>
@@ -273,7 +273,7 @@ export default function FloorTasks() {
                             {task.status || 'Готово'}
                           </span>
                         ) : task.status === 'В работе' ? (
-                          <span className="px-2 py-0.5 rounded text-xs bg-blue-500/20 text-blue-400">
+                          <span className="px-2 py-0.5 rounded text-xs bg-lime-500/20 text-lime-400">
                             В работе
                           </span>
                         ) : (canEdit || canEditAsOperator) && canStart ? (
@@ -375,7 +375,7 @@ export default function FloorTasks() {
             </tbody>
           </table>
         )}
-      </div>
+      </NeonCard>
 
       {editModalTask && (
         <EditVariantsModal

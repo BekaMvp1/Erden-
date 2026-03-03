@@ -11,6 +11,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { NeonCard } from '../components/ui';
 
 const FLOOR_1_HINT = '1 этаж — финиш: ОТК, петля, пуговица, метка, упаковка';
 const FLOOR_STORAGE_KEY = 'planning_last_floor';
@@ -515,18 +516,18 @@ export default function Planning() {
   const floor1Selected = showFloorStep && Number(floorId) === 1;
 
   const selectClass = (disabled) =>
-    `px-4 py-2 rounded-lg border ${
+    `px-4 py-2 rounded-btn border ${
       disabled
-        ? 'bg-accent-2/70 dark:bg-dark-800/80 border-white/20 cursor-not-allowed text-[#ECECEC]/80'
-        : 'bg-accent-2/80 dark:bg-dark-800 border-white/25 dark:border-white/25 text-[#ECECEC]'
-    } dark:text-dark-text`;
+        ? 'bg-neon-surface2/70 border-white/20 cursor-not-allowed text-neon-muted'
+        : 'bg-neon-surface2 border-neon-border text-neon-text focus:shadow-neon'
+    }`;
 
   const inputClass = (disabled) =>
-    `px-3 py-2 rounded-lg border ${
+    `px-3 py-2 rounded-btn border ${
       disabled
-        ? 'bg-accent-2/70 dark:bg-dark-800/80 border-white/20 cursor-not-allowed'
-        : 'bg-accent-2/80 dark:bg-dark-800 border-white/25 dark:border-white/25'
-    } ${disabled ? 'text-[#ECECEC]/70' : 'text-[#ECECEC]'} dark:text-dark-text`;
+        ? 'bg-neon-surface2/70 border-white/20 cursor-not-allowed'
+        : 'bg-neon-surface2 border-neon-border focus:shadow-neon'
+    } ${disabled ? 'text-neon-muted' : 'text-neon-text'}`;
 
   const fromDateRef = useRef(null);
   const toDateRef = useRef(null);
@@ -715,7 +716,7 @@ export default function Planning() {
           <button
             type="button"
             onClick={() => setFlowOpen(!flowOpen)}
-            className="flex items-center gap-2 w-full text-left px-4 py-3 rounded-xl bg-accent-3/80 dark:bg-dark-900 border border-white/25 hover:bg-accent-3 dark:hover:bg-dark-800 transition-colors"
+            className="flex items-center gap-2 w-full text-left px-4 py-3 rounded-card bg-neon-surface border border-neon-border hover:shadow-neon transition-colors"
           >
             <svg className={`w-5 h-5 transition-transform ${flowOpen ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
@@ -723,7 +724,7 @@ export default function Planning() {
             <span className="font-medium text-[#ECECEC] dark:text-dark-text">Параметры потока (расчёт)</span>
           </button>
           {flowOpen && (
-            <div className="mt-2 p-4 rounded-xl bg-accent-3/80 dark:bg-dark-900 border border-white/25 space-y-4">
+            <div className="mt-2 p-4 rounded-card bg-neon-surface border border-neon-border space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm text-[#ECECEC]/80 mb-1">Длительность смены (ч)</label>
@@ -1111,14 +1112,14 @@ export default function Planning() {
 
       {/* Пустое состояние */}
       {!workshopId && (
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 p-12 text-center text-[#ECECEC]/80 dark:text-dark-text/80 transition-block">
+        <NeonCard className="p-12 text-center text-neon-muted transition-block">
           Выберите цех
-        </div>
+        </NeonCard>
       )}
 
       {/* Таблица */}
       {workshopId && (
-        <div className="print-area bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden overflow-x-auto transition-block">
+        <NeonCard className="print-area overflow-hidden overflow-x-auto transition-block p-0">
           {!canLoadTable ? (
             <div className="p-12 text-center text-[#ECECEC]/70 dark:text-dark-text/70">
               {!orderId
@@ -1146,10 +1147,10 @@ export default function Planning() {
               <table className="w-full min-w-[400px]">
                 <thead>
                   <tr className="bg-accent-2/80 dark:bg-dark-800 border-b border-white/25">
-                    <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дата</th>
-                    <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">План</th>
-                    <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Факт</th>
-                    {canEdit && <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Действия</th>}
+                    <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Дата</th>
+                    <th className="text-right px-4 py-3 text-sm font-medium text-neon-muted">План</th>
+                    <th className="text-right px-4 py-3 text-sm font-medium text-neon-muted">Факт</th>
+                    {canEdit && <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Действия</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1186,16 +1187,16 @@ export default function Planning() {
                     );
                   })}
                   <tr className="bg-accent-2/50 dark:bg-dark-800 border-t-2 border-white/25 font-bold">
-                    <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text">Итого</td>
-                    <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{data.totals?.planned_sum ?? 0}</td>
-                    <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{data.totals?.actual_sum ?? 0}</td>
+                    <td className="px-4 py-3 text-neon-text">Итого</td>
+                    <td className="px-4 py-3 text-right text-neon-text">{data.totals?.planned_sum ?? 0}</td>
+                    <td className="px-4 py-3 text-right text-neon-text">{data.totals?.actual_sum ?? 0}</td>
                     {canEdit && <td className="px-4 py-3" />}
                   </tr>
                 </tbody>
               </table>
             </>
           )}
-        </div>
+        </NeonCard>
       )}
 
       {/* Модалка редактирования */}

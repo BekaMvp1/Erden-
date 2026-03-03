@@ -10,18 +10,14 @@ const ThemeContext = createContext({ theme: 'dark', setTheme: () => {}, toggleTh
 const STORAGE_KEY = 'app-theme';
 
 function getInitialTheme() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) || 'dark';
-  } catch {
-    return 'dark';
-  }
+  return 'dark';
 }
 
 export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState(getInitialTheme);
 
   const setTheme = (value) => {
-    const next = value === 'light' ? 'light' : 'dark';
+    const next = 'dark';
     setThemeState(next);
     try {
       localStorage.setItem(STORAGE_KEY, next);
@@ -29,24 +25,16 @@ export function ThemeProvider({ children }) {
   };
 
   const toggleTheme = () => {
-    setThemeState((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      try {
-        localStorage.setItem(STORAGE_KEY, next);
-      } catch {}
-      return next;
-    });
+    setThemeState('dark');
+    try {
+      localStorage.setItem(STORAGE_KEY, 'dark');
+    } catch {}
   };
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-      root.style.colorScheme = 'dark';
-    } else {
-      root.classList.remove('dark');
-      root.style.colorScheme = 'light';
-    }
+    root.classList.add('dark');
+    root.style.colorScheme = 'dark';
   }, [theme]);
 
   return (

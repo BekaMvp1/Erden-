@@ -7,13 +7,177 @@ const { Op } = require('sequelize');
 const db = require('../models');
 const { logAudit } = require('../utils/audit');
 const { trySyncOrderToCloud, queueOrderForSync } = require('../services/cloudSync');
+const { STAGES, DEFAULT_STAGE_DAYS } = require('../constants/boardStages');
 
 const router = express.Router();
 
 /**
+ * Добавить дни к дате в формате YYYY-MM-DD
+ */
+function addDaysToIso(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Нормализация строки для поиска по ключевым словам
+ */
+function normalizeText(value) {
+  return String(value || '').toLowerCase();
+}
+
+/**
+ * Собрать заголовок заказа из TZ/MODEL
+ */
+function buildOrderTitle(tzCode, modelName) {
+  const tz = String(tzCode || '').trim();
+  const model = String(modelName || '').trim();
+  if (tz && model) return `${tz} — ${model}`;
+  if (tz) return tz;
+  if (model) return model;
+  return '';
+}
+
+/**
+ * Нормализовать поля TZ/MODEL с обратной совместимостью по title
+ */
+function resolveOrderNameFields({ title, tz_code, model_name }) {
+  const rawTitle = String(title || '').trim();
+  let tzCode = String(tz_code || '').trim();
+  let modelName = String(model_name || '').trim();
+
+  if ((!tzCode || !modelName) && rawTitle.includes('—')) {
+    const [left, ...right] = rawTitle.split('—');
+    tzCode = tzCode || String(left || '').trim();
+    modelName = modelName || String(right.join('—') || '').trim();
+  }
+  if ((!tzCode || !modelName) && rawTitle.includes('-')) {
+    const [left, ...right] = rawTitle.split('-');
+    tzCode = tzCode || String(left || '').trim();
+    modelName = modelName || String(right.join('-') || '').trim();
+  }
+
+  const finalTitle = buildOrderTitle(tzCode, modelName) || rawTitle;
+  return { title: finalTitle, tz_code: tzCode, model_name: modelName };
+}
+
+const PROCUREMENT_API_STATUS_TO_DB = {
+  draft: 'Ожидает закуп',
+  sent: 'Частично',
+  received: 'Закуплено',
+  canceled: 'Отменено',
+};
+
+const PROCUREMENT_DB_STATUS_TO_API = {
+  'Ожидает закуп': 'draft',
+  'Частично': 'sent',
+  'Закуплено': 'received',
+  'Отменено': 'canceled',
+};
+
+/**
+ * Сформировать итоговый title из TZ/MODEL
+ */
+function buildOrderTitle(tzCode, modelName, fallbackTitle) {
+  const tz = String(tzCode || '').trim();
+  const model = String(modelName || '').trim();
+  if (tz && model) return `${tz} — ${model}`;
+  if (fallbackTitle != null && String(fallbackTitle).trim()) return String(fallbackTitle).trim();
+  return [tz, model].filter(Boolean).join(' — ');
+}
+
+/**
+ * Нормализация статуса закупа из UI в БД
+ */
+function mapProcurementStatusToDb(status) {
+  const raw = String(status || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'draft' || raw === 'черновик' || raw === 'ожидает закуп') return 'Ожидает закуп';
+  if (raw === 'sent' || raw === 'отправлено' || raw === 'частично') return 'Частично';
+  if (raw === 'received' || raw === 'получено' || raw === 'закуплено') return 'Закуплено';
+  if (raw === 'canceled' || raw === 'отменено') return 'Отменено';
+  return null;
+}
+
+/**
+ * Нормализация статуса закупа из БД в API
+ */
+function mapProcurementStatusToApi(status) {
+  const value = String(status || '').trim();
+  if (value === 'Закуплено') return 'received';
+  if (value === 'Частично') return 'sent';
+  if (value === 'Отменено') return 'canceled';
+  return 'draft';
+}
+
+/**
+ * Нормализация единиц измерения
+ */
+function normalizeProcurementUnit(unit) {
+  const value = String(unit || '').trim().toLowerCase();
+  if (!value) return null;
+  const map = {
+    'рулон': 'рулон',
+    'рулоны': 'рулон',
+    'kg': 'кг',
+    'кг': 'кг',
+    'тонн': 'тонн',
+    'тонна': 'тонн',
+    'тонны': 'тонн',
+    'метр': 'метр',
+    'м': 'метр',
+    'шт': 'шт',
+    'штук': 'шт',
+    'РУЛОН': 'рулон',
+    'КГ': 'кг',
+    'ТОННА': 'тонн',
+  };
+  return map[value] || null;
+}
+
+function toDecimalNumber(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  const factor = 10 ** digits;
+  return Math.round(num * factor) / factor;
+}
+
+/**
+ * Подбор operation_id для этапов панели
+ */
+async function resolveStageOperationIds(transaction) {
+  const operations = await db.Operation.findAll({
+    attributes: ['id', 'name', 'category'],
+    transaction,
+    raw: true,
+  });
+  if (!operations.length) {
+    throw new Error('В справочнике операций нет данных. Невозможно создать этапы заказа.');
+  }
+
+  const byName = (keywords) =>
+    operations.find((op) => keywords.some((k) => normalizeText(op.name).includes(k)))?.id;
+  const byCategory = (category) =>
+    operations.find((op) => String(op.category || '').toUpperCase() === category)?.id;
+  const firstOperationId = operations[0].id;
+
+  return {
+    procurement: byName(['закуп']) || firstOperationId,
+    warehouse: byName(['склад']) || firstOperationId,
+    cutting: byName(['раскрой', 'крой']) || byCategory('CUTTING') || firstOperationId,
+    sewing: byName(['пошив', 'стач', 'шв']) || byCategory('SEWING') || firstOperationId,
+    qc: byName(['отк', 'контрол']) || byCategory('FINISH') || firstOperationId,
+    packing: byName(['упаков']) || firstOperationId,
+    fg_warehouse: byName(['склад гп', 'гп']) || firstOperationId,
+    shipping: byName(['отгруз']) || firstOperationId,
+  };
+}
+
+/**
  * POST /api/orders
  * Создание заказа (статус = Принят, без распределения)
- * Формат с вариантами: client_id, title, total_quantity, deadline, planned_month, floor_id, sizes[], variants[]
+ * Формат с вариантами: client_id, tz_code, model_name, total_quantity, deadline, planned_month, floor_id, sizes[], variants[]
  * Формат legacy: client_id, title, quantity, deadline, planned_month, floor_id, color (без матрицы)
  */
 router.post('/', async (req, res, next) => {
@@ -21,6 +185,9 @@ router.post('/', async (req, res, next) => {
     const {
       client_id,
       title,
+      tz_code,
+      model_name,
+      article,
       quantity,
       total_quantity,
       deadline,
@@ -34,10 +201,15 @@ router.post('/', async (req, res, next) => {
       sizes,
       variants,
       photos,
+      start_date,
     } = req.body;
 
-    if (!client_id || !title || !deadline) {
-      return res.status(400).json({ error: 'Укажите client_id, title, deadline' });
+    const nameFields = resolveOrderNameFields({ title, tz_code, model_name });
+    if (!client_id || !nameFields.title || !deadline) {
+      return res.status(400).json({ error: 'Укажите client_id, tz_code, model_name, deadline' });
+    }
+    if (!nameFields.tz_code || !nameFields.model_name) {
+      return res.status(400).json({ error: 'Поля "ТЗ / Код модели" и "Название модели" обязательны' });
     }
     if (!planned_month) {
       return res.status(400).json({ error: 'Укажите planned_month (месяц плана)' });
@@ -138,7 +310,10 @@ router.post('/', async (req, res, next) => {
       order = await db.Order.create(
         {
           client_id: parseInt(client_id, 10),
-          title: String(title).trim(),
+          title: nameFields.title,
+          tz_code: nameFields.tz_code,
+          model_name: nameFields.model_name,
+          article: article ? String(article).trim() : null,
           quantity: qty,
           total_quantity: qty,
           deadline,
@@ -171,9 +346,46 @@ router.post('/', async (req, res, next) => {
         {
           order_id: order.id,
           status: 'Ожидает закуп',
+          created_by: req.user?.id || null,
         },
         { transaction: t }
       );
+
+      // Создаём 8 этапов панели с плановыми сроками
+      const operationIdsByStage = await resolveStageOperationIds(t);
+      const startDateIso =
+        start_date && /^\d{4}-\d{2}-\d{2}$/.test(String(start_date))
+          ? String(start_date)
+          : new Date().toISOString().slice(0, 10);
+      let currentDate = startDateIso;
+
+      for (const stage of STAGES) {
+        const stageKey = stage.key;
+        const days = Math.max(0, Number(DEFAULT_STAGE_DAYS[stageKey]) || 0);
+        const plannedStartDate = currentDate;
+        const plannedEndDate = days > 0 ? addDaysToIso(plannedStartDate, days - 1) : null;
+
+        await db.OrderOperation.create(
+          {
+            order_id: order.id,
+            operation_id: operationIdsByStage[stageKey],
+            status: 'Ожидает',
+            planned_quantity: qty,
+            actual_quantity: 0,
+            stage_key: stageKey,
+            planned_qty: qty,
+            actual_qty: 0,
+            planned_start_date: plannedStartDate,
+            planned_end_date: plannedEndDate,
+            planned_days: days,
+            actual_start_date: null,
+            actual_end_date: null,
+          },
+          { transaction: t }
+        );
+
+        currentDate = plannedEndDate ? addDaysToIso(plannedEndDate, 1) : currentDate;
+      }
 
       await t.commit();
     } catch (err) {
@@ -211,7 +423,7 @@ router.post('/', async (req, res, next) => {
 /**
  * GET /api/orders
  * Список заказов с фильтрацией (status_id, search по клиенту и названию, пагинация)
- * search — ILIKE по clients.name и orders.title
+ * search — ILIKE по clients.name, orders.title, orders.tz_code, orders.model_name
  */
 router.get('/', async (req, res, next) => {
   try {
@@ -250,6 +462,8 @@ router.get('/', async (req, res, next) => {
         [Op.or]: [
           { '$Client.name$': { [Op.iLike]: term } },
           { title: { [Op.iLike]: term } },
+          { tz_code: { [Op.iLike]: term } },
+          { model_name: { [Op.iLike]: term } },
         ],
       });
     }
@@ -313,6 +527,256 @@ router.get('/by-workshop', async (req, res, next) => {
     }));
     res.json(result);
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/orders/:id/procurement
+ * Возвращает данные закупа по заказу (черновик, если заявки ещё нет)
+ */
+router.get('/:id/procurement', async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    const order = await db.Order.findByPk(orderId, {
+      include: [
+        { model: db.Client, as: 'Client', attributes: ['id', 'name'] },
+        { model: db.OrderVariant, as: 'OrderVariants', attributes: ['color', 'quantity'] },
+      ],
+    });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    if (req.user.role === 'technologist' && req.allowedFloorId) {
+      const orderFloor = order.building_floor_id ?? order.floor_id;
+      if (orderFloor != null && Number(orderFloor) !== Number(req.allowedFloorId)) {
+        return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
+      }
+    }
+    if (req.user.role === 'operator' && req.user.Sewer) {
+      const hasMyOps = await db.OrderOperation.count({
+        where: { order_id: order.id, sewer_id: req.user.Sewer.id },
+      });
+      if (!hasMyOps) {
+        return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
+      }
+    }
+
+    let request = await db.ProcurementRequest.findOne({
+      where: { order_id: order.id },
+      include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
+      order: [[{ model: db.ProcurementItem, as: 'ProcurementItems' }, 'id', 'ASC']],
+    });
+
+    if (!request) {
+      request = await db.ProcurementRequest.create({
+        order_id: order.id,
+        status: 'Ожидает закуп',
+        created_by: req.user?.id || null,
+      });
+      request = await db.ProcurementRequest.findByPk(request.id, {
+        include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
+      });
+    }
+
+    const items = (request.ProcurementItems || []).map((item) => ({
+      id: item.id,
+      material_name: item.name || '',
+      qty: Number(item.quantity || 0),
+      unit: String(item.unit || '').toLowerCase(),
+      price: Number(item.price || 0),
+      sum: Number(item.total || 0),
+      supplier: item.supplier || '',
+      comment: item.comment || '',
+    }));
+    const totalSum = items.reduce((acc, item) => acc + (Number(item.sum) || 0), 0);
+
+    if (Number(request.total_sum || 0) !== Number(totalSum.toFixed(2))) {
+      await request.update({ total_sum: Number(totalSum.toFixed(2)) });
+    }
+
+    return res.json({
+      order_id: order.id,
+      order: {
+        id: order.id,
+        title: order.title,
+        tz_code: order.tz_code || '',
+        model_name: order.model_name || '',
+        client_name: order.Client?.name || '—',
+        total_quantity: order.total_quantity ?? order.quantity ?? 0,
+        deadline: order.deadline,
+      },
+      procurement: {
+        id: request.id,
+        status: PROCUREMENT_DB_STATUS_TO_API[request.status] || 'draft',
+        status_label: request.status,
+        due_date: request.due_date || null,
+        total_sum: Number(totalSum.toFixed(2)),
+      },
+      items,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/orders/:id/procurement
+ * Сохранение закупа из карточки заказа
+ */
+router.put('/:id/procurement', async (req, res, next) => {
+  let t;
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    if (!['admin', 'manager', 'technologist'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'У вас только просмотр закупа' });
+    }
+
+    const order = await db.Order.findByPk(orderId, { attributes: ['id', 'floor_id', 'building_floor_id'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    if (req.user.role === 'technologist' && req.allowedFloorId) {
+      const orderFloor = order.building_floor_id ?? order.floor_id;
+      if (orderFloor != null && Number(orderFloor) !== Number(req.allowedFloorId)) {
+        return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
+      }
+    }
+
+    const { due_date, status, items } = req.body || {};
+    if (due_date != null && due_date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(due_date))) {
+      return res.status(400).json({ error: 'Дата закупа должна быть в формате YYYY-MM-DD' });
+    }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: 'Поле items должно быть массивом' });
+    }
+
+    const mappedStatus = status ? PROCUREMENT_API_STATUS_TO_DB[status] : null;
+    if (status && !mappedStatus) {
+      return res.status(400).json({ error: 'Статус должен быть: draft, sent, received или canceled' });
+    }
+
+    const normalizedItems = [];
+    for (const [index, raw] of items.entries()) {
+      const materialName = String(raw.material_name || '').trim();
+      const qty = Number(raw.qty);
+      const unit = String(raw.unit || '').trim().toUpperCase();
+      const price = Number(raw.price || 0);
+      const supplier = raw.supplier ? String(raw.supplier).trim() : null;
+      const comment = raw.comment ? String(raw.comment).trim() : null;
+
+      const allowedUnits = ['РУЛОН', 'КГ', 'ТОННА', 'МЕТР', 'ШТ'];
+      if (!materialName) return res.status(400).json({ error: `Материал #${index + 1}: укажите название` });
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return res.status(400).json({ error: `Материал #${index + 1}: количество должно быть больше 0` });
+      }
+      if (!allowedUnits.includes(unit)) {
+        return res.status(400).json({ error: `Материал #${index + 1}: единица должна быть рулон/кг/тонн/метр/шт` });
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        return res.status(400).json({ error: `Материал #${index + 1}: цена должна быть >= 0` });
+      }
+
+      const sum = Number((qty * price).toFixed(2));
+      normalizedItems.push({
+        material_name: materialName,
+        qty,
+        unit,
+        price: Number(price.toFixed(2)),
+        sum,
+        supplier,
+        comment,
+      });
+    }
+
+    t = await db.sequelize.transaction();
+    let request = await db.ProcurementRequest.findOne({
+      where: { order_id: orderId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!request) {
+      request = await db.ProcurementRequest.create(
+        { order_id: orderId, status: mappedStatus || 'Ожидает закуп', created_by: req.user?.id || null },
+        { transaction: t }
+      );
+    }
+
+    await request.update(
+      {
+        due_date: due_date || null,
+        status: mappedStatus || request.status,
+        total_sum: Number(normalizedItems.reduce((acc, item) => acc + item.sum, 0).toFixed(2)),
+      },
+      { transaction: t }
+    );
+
+    await db.ProcurementItem.destroy({
+      where: { procurement_request_id: request.id },
+      transaction: t,
+    });
+
+    if (normalizedItems.length > 0) {
+      await db.ProcurementItem.bulkCreate(
+        normalizedItems.map((item) => ({
+          procurement_request_id: request.id,
+          name: item.material_name,
+          quantity: item.qty,
+          unit: item.unit,
+          price: item.price,
+          total: item.sum,
+          supplier: item.supplier,
+          comment: item.comment,
+        })),
+        { transaction: t }
+      );
+    }
+
+    await t.commit();
+    await logAudit(req.user.id, 'UPDATE', 'procurement_request', request.id);
+    const updatedOrder = await db.Order.findByPk(orderId, {
+      include: [{ model: db.Client, as: 'Client', attributes: ['id', 'name'] }],
+    });
+    const updatedRequest = await db.ProcurementRequest.findByPk(request.id, {
+      include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
+      order: [[{ model: db.ProcurementItem, as: 'ProcurementItems' }, 'id', 'ASC']],
+    });
+
+    const outItems = (updatedRequest.ProcurementItems || []).map((item) => ({
+      id: item.id,
+      material_name: item.name || '',
+      qty: Number(item.quantity || 0),
+      unit: String(item.unit || '').toLowerCase(),
+      price: Number(item.price || 0),
+      sum: Number(item.total || 0),
+      supplier: item.supplier || '',
+      comment: item.comment || '',
+    }));
+
+    return res.json({
+      order_id: orderId,
+      order: {
+        id: updatedOrder.id,
+        title: updatedOrder.title,
+        tz_code: updatedOrder.tz_code || '',
+        model_name: updatedOrder.model_name || '',
+        client_name: updatedOrder.Client?.name || '—',
+        total_quantity: updatedOrder.total_quantity ?? updatedOrder.quantity ?? 0,
+        deadline: updatedOrder.deadline,
+      },
+      procurement: {
+        id: updatedRequest.id,
+        status: PROCUREMENT_DB_STATUS_TO_API[updatedRequest.status] || 'draft',
+        status_label: updatedRequest.status,
+        due_date: updatedRequest.due_date || null,
+        total_sum: Number(updatedRequest.total_sum || 0),
+      },
+      items: outItems,
+    });
+  } catch (err) {
+    if (t) await t.rollback().catch(() => {});
     next(err);
   }
 });
@@ -419,13 +883,9 @@ router.post('/:id/complete', async (req, res, next) => {
       return res.status(400).json({ error: 'Заказ уже завершён' });
     }
 
-    // technologist — только заказы своего этажа (должен быть распределён)
+    // technologist — только заказы своего этажа
     if (req.user.role === 'technologist' && req.allowedFloorId) {
-      if (order.floor_id == null) {
-        await t.rollback();
-        return res.status(400).json({ error: 'Заказ не распределён. Сначала распределите заказ.' });
-      }
-      if (order.floor_id !== req.allowedFloorId) {
+      if (order.floor_id != null && order.floor_id !== req.allowedFloorId) {
         await t.rollback();
         return res.status(403).json({ error: 'Нет прав завершать заказы другого этажа' });
       }
@@ -434,7 +894,7 @@ router.post('/:id/complete', async (req, res, next) => {
     const ops = order.OrderOperations || [];
     if (ops.length === 0) {
       await t.rollback();
-      return res.status(400).json({ error: 'Нельзя завершить заказ без распределённых операций' });
+      return res.status(400).json({ error: 'Нельзя завершить заказ без операций' });
     }
 
     // Проверка: все операции должны быть в статусе «Готово» (производственная цепочка)
@@ -575,6 +1035,9 @@ router.put('/:id', async (req, res, next) => {
     const {
       client_id,
       title,
+      tz_code,
+      model_name,
+      article,
       quantity,
       total_quantity,
       deadline,
@@ -591,7 +1054,21 @@ router.put('/:id', async (req, res, next) => {
 
     const updates = {};
     if (client_id != null) updates.client_id = parseInt(client_id, 10);
-    if (title != null) updates.title = String(title).trim();
+    const hasNameInput = title != null || tz_code != null || model_name != null;
+    if (hasNameInput) {
+      const merged = resolveOrderNameFields({
+        title: title != null ? title : order.title,
+        tz_code: tz_code != null ? tz_code : order.tz_code,
+        model_name: model_name != null ? model_name : order.model_name,
+      });
+      if (!merged.title || !merged.tz_code || !merged.model_name) {
+        return res.status(400).json({ error: 'Поля "ТЗ / Код модели" и "Название модели" обязательны' });
+      }
+      updates.title = merged.title;
+      updates.tz_code = merged.tz_code;
+      updates.model_name = merged.model_name;
+    }
+    if (article !== undefined) updates.article = article ? String(article).trim() : null;
     if (deadline != null) updates.deadline = deadline;
     if (comment !== undefined) updates.comment = comment ? String(comment).trim() : null;
     if (planned_month !== undefined) updates.planned_month = planned_month ? String(planned_month).trim() : null;
@@ -779,13 +1256,6 @@ router.get('/:id', async (req, res, next) => {
         { model: db.Floor, as: 'Floor' },
         { model: db.BuildingFloor, as: 'BuildingFloor' },
         { model: db.Technologist, as: 'Technologist', include: [{ model: db.User, as: 'User' }] },
-        {
-          model: db.OrderFloorDistribution,
-          as: 'OrderFloorDistributions',
-          limit: 1,
-          order: [['created_at', 'DESC']],
-          separate: true,
-        },
         {
           model: db.OrderOperation,
           as: 'OrderOperations',

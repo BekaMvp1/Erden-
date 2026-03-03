@@ -30,6 +30,7 @@ const financeRoutes = require("./routes/finance");
 const aiRoutes = require("./routes/ai");
 const settingsRoutes = require("./routes/settings");
 const sizesRoutes = require("./routes/sizes");
+const boardRoutes = require("./routes/boardRoutes");
 const analyticsRoutes = require("./modules/analytics/analytics.routes");
 const assistantRoutes = require("./modules/assistant/assistant.routes");
 const plannerRoutes = require("./modules/planner/planner.routes");
@@ -142,9 +143,8 @@ app.use(
 app.use(
   "/api/procurement",
   authenticate,
-  requireRole("admin", "manager", "technologist"),
+  requireRole("admin", "manager", "technologist", "operator"),
   technologistFloorOnly,
-  operatorRestricted,
   procurementRoutes,
 );
 app.use(
@@ -230,6 +230,13 @@ app.use(
   authenticate,
   requireRole("admin", "manager", "technologist", "operator"),
   settingsRoutes,
+);
+app.use(
+  "/api/board",
+  authenticate,
+  requireRole("admin", "manager", "technologist", "operator"),
+  technologistFloorOnly,
+  boardRoutes,
 );
 app.use(
   "/api/analytics",

@@ -8,10 +8,11 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
+import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
 
 const STATUS_COLORS = {
   Принят: 'bg-yellow-500/20 text-yellow-400',
-  'В работе': 'bg-blue-500/20 text-blue-400',
+  'В работе': 'bg-lime-500/20 text-lime-400',
   Готов: 'bg-green-500/20 text-green-400',
   Просрочен: 'bg-red-500/20 text-red-400',
 };
@@ -91,48 +92,49 @@ export default function Dashboard() {
   const canEdit = !!user;
 
   return (
-    <div className="text-[#FDEB9E]">
+    <div className="text-neon-text">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl md:text-2xl font-bold">Заказ</h1>
-          <button
+          <h1 className="text-xl md:text-2xl font-bold">Заказы</h1>
+          <NeonButton
             type="button"
             onClick={() => loadOrders()}
             disabled={loading}
-            className="p-2 rounded-lg bg-black/20 text-[#FDEB9E] hover:bg-black/30 disabled:opacity-50"
+            variant="secondary"
+            className="p-2"
             title="Обновить список"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-          </button>
+          </NeonButton>
         </div>
         <div className="flex-1 flex justify-center items-center gap-2 max-w-md w-full sm:w-auto sm:mx-auto">
-          <input
+          <NeonInput
             type="text"
             placeholder="Просто поиск"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] placeholder-white/50"
           />
           {searchInput && (
-          <button
+          <NeonButton
             type="button"
             onClick={clearSearch}
-            className="p-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3"
+            variant="secondary"
+            className="p-2"
             title="Очистить"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
+          </NeonButton>
           )}
         </div>
         {statuses.length > 0 && (
-          <select
+          <NeonSelect
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-black/20 border border-white/30 text-[#FDEB9E] shrink-0"
+            className="shrink-0"
           >
             <option value="">Все статусы</option>
             {statuses.map((s) => (
@@ -140,35 +142,35 @@ export default function Dashboard() {
                 {s.name}
               </option>
             ))}
-          </select>
+          </NeonSelect>
         )}
       </div>
 
-      <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden transition-block hover:shadow-xl">
+      <NeonCard className="overflow-hidden p-0">
         {loading ? (
-          <div className="p-6 md:p-8 text-center text-[#FDEB9E]/90">Загрузка...</div>
+          <div className="p-6 md:p-8 text-center text-neon-muted">Загрузка...</div>
         ) : orders.length === 0 ? (
-          <div className="p-6 md:p-8 text-center text-[#FDEB9E]/90">Нет заказов</div>
+          <div className="p-6 md:p-8 text-center text-neon-muted">Нет заказов</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-white/20 dark:border-white/20">
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">ID</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Название</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Клиент</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Кол-во</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дедлайн</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Статус</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Цех пошива</th>
-                {(canEdit || canDelete) && <th className="w-24 px-4 py-3 text-[#ECECEC] dark:text-dark-text/90">Действия</th>}
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">ID</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Название</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Клиент</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Кол-во</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Дедлайн</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Статус</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Цех пошива</th>
+                {(canEdit || canDelete) && <th className="w-24 px-4 py-3 text-neon-muted">Действия</th>}
               </tr>
             </thead>
             <tbody>
               {orders.map((order) => (
                 <tr
                   key={order.id}
-                  className="border-b border-white/15 dark:border-white/15 hover:bg-accent-1/20 dark:hover:bg-dark-2/50 transition-colors duration-300 ease-out"
+                  className="border-b border-white/10 hover:bg-white/5 transition-colors duration-300 ease-out"
                 >
                   <td className="px-4 py-3">
                     <Link
@@ -178,10 +180,10 @@ export default function Dashboard() {
                       #{order.id}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text">{order.title}</td>
-                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.Client?.name}</td>
-                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.quantity}</td>
-                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 whitespace-nowrap">{order.deadline}</td>
+                  <td className="px-4 py-3 text-neon-text">{order.title}</td>
+                  <td className="px-4 py-3 text-neon-muted">{order.Client?.name}</td>
+                  <td className="px-4 py-3 text-neon-muted">{order.quantity}</td>
+                  <td className="px-4 py-3 text-neon-muted whitespace-nowrap">{order.deadline}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block px-2 py-1 rounded text-xs font-medium ${
@@ -191,7 +193,7 @@ export default function Dashboard() {
                       {order.OrderStatus?.name}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80">{order.Floor?.name || '—'}</td>
+                  <td className="px-4 py-3 text-neon-muted">{order.Floor?.name || '—'}</td>
                   {(canEdit || canDelete) && (
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
@@ -228,7 +230,7 @@ export default function Dashboard() {
           </table>
           </div>
         )}
-      </div>
+    </NeonCard>
     </div>
   );
 }

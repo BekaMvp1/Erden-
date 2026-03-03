@@ -17,6 +17,20 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING(255),
       allowNull: false,
     },
+    tz_code: {
+      type: DataTypes.STRING(60),
+      allowNull: false,
+      defaultValue: '',
+    },
+    model_name: {
+      type: DataTypes.STRING(160),
+      allowNull: false,
+      defaultValue: '',
+    },
+    article: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
     quantity: {
       type: DataTypes.INTEGER,
       allowNull: false,

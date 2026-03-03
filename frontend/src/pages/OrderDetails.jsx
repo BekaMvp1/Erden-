@@ -5,11 +5,12 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
 import { CompleteByFactModal } from './Cutting';
+import ProcurementModal from '../components/procurement/ProcurementModal';
 
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
@@ -17,7 +18,7 @@ const DEFAULT_SIZES = [...LETTER_SIZES, ...NUMERIC_SIZES];
 
 const STATUS_COLORS = {
   Принят: 'bg-yellow-500/20 text-yellow-400',
-  'В работе': 'bg-blue-500/20 text-blue-400',
+  'В работе': 'bg-lime-500/20 text-lime-400',
   Готов: 'bg-green-500/20 text-green-400',
   Просрочен: 'bg-red-500/20 text-red-400',
 };
@@ -65,7 +66,6 @@ export default function OrderDetails() {
   const [clients, setClients] = useState([]);
   const [floors, setFloors] = useState([]);
   const [statuses, setStatuses] = useState([]);
-  const [availableSizes, setAvailableSizes] = useState([]);
   const [editForm, setEditForm] = useState({});
   const [editSelectedSizes, setEditSelectedSizes] = useState([]);
   const [editColors, setEditColors] = useState([]);
@@ -83,6 +83,7 @@ export default function OrderDetails() {
   const [planModelLoading, setPlanModelLoading] = useState(false);
   const [planEditModal, setPlanEditModal] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
+  const [showProcurementModal, setShowProcurementModal] = useState(false);
   const editColorInputRef = useRef(null);
   const editColorDropdownRef = useRef(null);
 
@@ -206,7 +207,6 @@ export default function OrderDetails() {
       api.references.clients().then(setClients);
       api.references.floors().then(setFloors);
       api.references.orderStatus().then(setStatuses);
-      api.sizes.list().then((data) => setAvailableSizes(data || []));
     }
   }, [showEditModal]);
 
@@ -241,9 +241,16 @@ export default function OrderDetails() {
 
   useEffect(() => {
     if (showEditModal && order) {
+      const fallbackTitle = String(order.title || '');
+      const splitByDash = fallbackTitle.includes('—')
+        ? fallbackTitle.split('—')
+        : fallbackTitle.split('-');
+      const fallbackTz = String(splitByDash[0] || '').trim();
+      const fallbackModel = String(splitByDash.slice(1).join('—') || '').trim();
       setEditForm({
         client_id: order.client_id,
-        title: order.title,
+        tz_code: order.tz_code || fallbackTz,
+        model_name: order.model_name || fallbackModel,
         total_quantity: String(order.total_quantity ?? order.quantity ?? ''),
         deadline: order.deadline,
         comment: order.comment || '',
@@ -406,7 +413,9 @@ export default function OrderDetails() {
       });
       const payload = {
         client_id: parseInt(editForm.client_id, 10),
-        title: editForm.title.trim(),
+        tz_code: editForm.tz_code?.trim(),
+        model_name: editForm.model_name?.trim(),
+        title: `${editForm.tz_code?.trim() || ''} — ${editForm.model_name?.trim() || ''}`.trim(),
         total_quantity: editTotalQty,
         deadline: editForm.deadline,
         comment: editForm.comment?.trim() || undefined,
@@ -444,6 +453,26 @@ export default function OrderDetails() {
     }
   };
 
+  const handleAddPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setUploadingPhoto(true);
+      setErrorMsg('');
+      try {
+        await api.orders.addPhoto(order.id, reader.result);
+        loadOrder();
+      } catch (err) {
+        setErrorMsg(err.message || 'Ошибка загрузки');
+      } finally {
+        setUploadingPhoto(false);
+        e.target.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const ops = order?.OrderOperations || [];
   // Заказ можно завершить только когда все операции: статус «Готово» и факт >= план
   const allOpsDone =
@@ -454,6 +483,15 @@ export default function OrderDetails() {
   );
   const isCompleted = order?.OrderStatus?.name === 'Готов';
   const cuttingTasks = order?.CuttingTasks || [];
+  const showOperationsSection = false;
+  const tzCode = String(order?.tz_code || '').trim();
+  const modelName = String(order?.model_name || '').trim();
+  const displayOrderName =
+    (tzCode && modelName ? `${tzCode} — ${modelName}` : '') ||
+    order?.title ||
+    tzCode ||
+    modelName ||
+    '';
 
   const handleCuttingStatusChange = async (task, newStatus) => {
     try {
@@ -504,29 +542,21 @@ export default function OrderDetails() {
     <div className="pt-2 sm:pt-4">
       <div className="no-print flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
         <h1 className="text-lg sm:text-2xl font-bold text-[#ECECEC] dark:text-dark-text truncate">
-          Заказ #{order.id} — {order.title}
+          {displayOrderName}
         </h1>
         <div className="flex gap-2 flex-wrap">
           <PrintButton />
-          {user?.role !== 'operator' &&
-            (order.OrderStatus?.name === 'Принят' || order.OrderStatus?.name === 'В работе') && (
-              <Link
-                to={`/planning/assign?order_id=${order.id}`}
-                className="px-4 py-2 rounded-lg bg-primary-600 text-white font-medium hover:bg-primary-700"
-              >
-                Распределить
-              </Link>
-            )}
-          <Link
-            to={`/procurement?order_id=${order.id}`}
+          <button
+            type="button"
+            onClick={() => setShowProcurementModal(true)}
             className="px-4 py-2 rounded-lg bg-accent-1/40 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/50 dark:hover:bg-dark-3 font-medium flex items-center gap-2"
-            title="Перейти к закупу"
+            title="Открыть закуп"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
-            Закуп
-          </Link>
+            Открыть закуп
+          </button>
           {canEditOrder(user) && (
             <button
               onClick={() => setShowEditModal(true)}
@@ -570,25 +600,42 @@ export default function OrderDetails() {
 
       <div className="print-area mb-4 sm:mb-6 flex flex-col gap-4 sm:gap-6">
         <h1 className="print-title print-only">
-          Заказ №{order.id} — {order.Client?.name || '—'} — {order.title}
+          {order.Client?.name || '—'} — {displayOrderName}
         </h1>
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden transition-block">
+        <div className="card-neon rounded-card overflow-hidden transition-block">
           <h2 className="text-base sm:text-lg font-medium text-[#ECECEC] dark:text-dark-text p-4 sm:p-6 border-b border-white/25 dark:border-white/25">
             Информация о заказе
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-[minmax(140px,1fr)_2fr] gap-0 md:gap-6">
             {/* Меньше половины — фото */}
-            <div className="p-4 sm:p-6 border-b md:border-b-0 md:border-r border-white/25 dark:border-white/25 flex flex-col items-center justify-center min-h-[200px]">
+            <div className="relative p-4 sm:p-6 border-b md:border-b-0 md:border-r border-white/25 dark:border-white/25 flex flex-col items-center justify-center min-h-[200px]">
+              {canEditOrder(user) && (order.photos?.length || 0) < 10 && (
+                <label
+                  className="absolute top-3 right-3 w-8 h-8 rounded-lg border border-white/25 bg-accent-2/60 hover:bg-accent-2/80 text-[#ECECEC] flex items-center justify-center cursor-pointer transition-colors"
+                  title="Добавить фото"
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={uploadingPhoto}
+                    onChange={handleAddPhoto}
+                  />
+                  {uploadingPhoto ? '…' : '+'}
+                </label>
+              )}
               {(order.photos || []).length > 0 ? (
-                <div className="flex flex-wrap gap-2 justify-center">
+                <div className="w-full flex flex-wrap gap-3 justify-center pt-8">
                   {(order.photos || []).map((photo, idx) => (
                     <div key={idx} className="relative group">
-                      <img
-                        src={photo}
-                        alt={`Фото ${idx + 1}`}
-                        className="w-32 h-32 md:w-40 md:h-40 object-cover rounded-lg border border-white/25 dark:border-white/25 cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => setViewingPhoto(photo)}
-                      />
+                      <div className="w-64 h-64 md:w-80 md:h-80 rounded-xl border-2 border-white/30 dark:border-white/30 bg-black/20 overflow-hidden">
+                        <img
+                          src={photo}
+                          alt={`Фото ${idx + 1}`}
+                          className="w-full h-full object-contain p-1 cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setViewingPhoto(photo)}
+                        />
+                      </div>
                       {canEditOrder(user) && (
                         <button
                           type="button"
@@ -608,94 +655,28 @@ export default function OrderDetails() {
                       )}
                     </div>
                   ))}
-                  {canEditOrder(user) && (order.photos?.length || 0) < 10 && (
-                    <label className="w-32 h-32 md:w-40 md:h-40 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/30 dark:border-white/30 hover:border-primary-500 cursor-pointer transition-colors">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={uploadingPhoto}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = async () => {
-                            setUploadingPhoto(true);
-                            setErrorMsg('');
-                            try {
-                              await api.orders.addPhoto(order.id, reader.result);
-                              loadOrder();
-                            } catch (err) {
-                              setErrorMsg(err.message || 'Ошибка загрузки');
-                            } finally {
-                              setUploadingPhoto(false);
-                              e.target.value = '';
-                            }
-                          };
-                          reader.readAsDataURL(file);
-                        }}
-                      />
-                      {uploadingPhoto ? (
-                        <span className="text-xs text-[#ECECEC]/80">...</span>
-                      ) : (
-                        <>
-                          <svg className="w-8 h-8 text-[#ECECEC]/60 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                          <span className="text-xs text-[#ECECEC]/70">Добавить</span>
-                        </>
-                      )}
-                    </label>
-                  )}
                 </div>
               ) : (
                 <>
-                  {canEditOrder(user) ? (
-                    <label className="w-full min-h-[180px] flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/30 dark:border-white/30 hover:border-primary-500 cursor-pointer transition-colors">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={uploadingPhoto}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = async () => {
-                            setUploadingPhoto(true);
-                            setErrorMsg('');
-                            try {
-                              await api.orders.addPhoto(order.id, reader.result);
-                              loadOrder();
-                            } catch (err) {
-                              setErrorMsg(err.message || 'Ошибка загрузки');
-                            } finally {
-                              setUploadingPhoto(false);
-                              e.target.value = '';
-                            }
-                          };
-                          reader.readAsDataURL(file);
-                        }}
-                      />
-                      {uploadingPhoto ? (
-                        <span className="text-[#ECECEC]/80">Загрузка...</span>
-                      ) : (
-                        <>
-                          <svg className="w-12 h-12 text-[#ECECEC]/50 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          <span className="text-sm text-[#ECECEC]/70">Добавить фото</span>
-                        </>
-                      )}
-                    </label>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-[#ECECEC]/50">
+                  <div className="w-full h-72 md:h-96 rounded-xl border-2 border-white/30 dark:border-white/30 bg-black/20 flex flex-col items-center justify-center text-[#ECECEC]/50">
+                    {canEditOrder(user) ? (
+                      <>
+                        <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span className="text-sm text-[#ECECEC]/70">
+                          {uploadingPhoto ? 'Загрузка...' : 'Нажмите + в углу для добавления фото'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
                       <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                       <span className="text-sm">Нет фото</span>
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -741,14 +722,6 @@ export default function OrderDetails() {
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Цех пошива</td>
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">{order.Floor?.name || '—'}</td>
                   </tr>
-                  {(order.OrderFloorDistributions?.[0]?.created_at) && (
-                    <tr className="border-b border-white/15 dark:border-white/15">
-                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Дата распределения</td>
-                      <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text whitespace-nowrap">
-                        {new Date(order.OrderFloorDistributions[0].created_at).toLocaleString('ru-RU')}
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
               {/* Цвета и размеры */}
@@ -845,9 +818,9 @@ export default function OrderDetails() {
           </div>
         </div>
 
-      {/* Блок задач раскроя — до Распределённых операций */}
+      {/* Блок задач раскроя — до операций заказа */}
       {cuttingTasks.length > 0 && (
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden mt-4 sm:mt-6 transition-block">
+        <div className="card-neon rounded-card overflow-hidden mt-4 sm:mt-6 transition-block">
           <div className="p-4 sm:p-6 border-b border-white/25 dark:border-white/25">
             <h2 className="text-base sm:text-lg font-medium text-[#ECECEC] dark:text-dark-text">
               Раскрой
@@ -1022,10 +995,10 @@ export default function OrderDetails() {
 
       {/* Планированные модели — после Раскрой */}
       {order?.workshop_id && (
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden mt-4 sm:mt-6 transition-block">
+        <div className="card-neon rounded-card overflow-hidden mt-4 sm:mt-6 transition-block">
           <div className="p-4 sm:p-6 border-b border-white/25 dark:border-white/25">
             <h2 className="text-base sm:text-lg font-medium text-[#ECECEC] dark:text-dark-text">
-              {order.Client?.name || '—'} — {order.title}
+              {order.Client?.name || '—'} — {displayOrderName}
               {(order.Workshop?.floors_count ?? 0) > 1 && order.BuildingFloor?.name && (
                 <span className="text-[#ECECEC]/80 dark:text-dark-text/80 font-normal"> • {order.BuildingFloor.name}</span>
               )}
@@ -1036,7 +1009,7 @@ export default function OrderDetails() {
           ) : !planModelData?.rows?.length ? (
             <div className="p-6 text-[#ECECEC]/80 dark:text-dark-text/80">
               {order.Workshop?.floors_count > 1 && !order.building_floor_id
-                ? 'Распределите заказ по этажу для просмотра плана'
+                ? 'Укажите этаж заказа для просмотра плана'
                 : 'Нет данных за выбранный период'}
             </div>
           ) : (() => {
@@ -1079,7 +1052,7 @@ export default function OrderDetails() {
                             onClick={() =>
                               setPlanEditModal({
                                 order_id: order.id,
-                                order_title: order.title,
+                order_title: displayOrderName,
                                 date: row.date,
                                 planned_qty: row.planned_qty ?? 0,
                                 actual_qty: row.actual_qty ?? 0,
@@ -1165,10 +1138,11 @@ export default function OrderDetails() {
         </div>
       )}
 
-      <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 overflow-hidden transition-block">
+      {showOperationsSection && (
+      <div className="card-neon rounded-card overflow-hidden transition-block">
         <div className="p-6 border-b border-white/25 dark:border-white/25">
           <h2 className="text-lg font-medium text-[#ECECEC] dark:text-dark-text mb-2">
-            Распределённые операции
+            Операции заказа
           </h2>
           {ops.length > 0 && (
             <p className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80">
@@ -1179,7 +1153,7 @@ export default function OrderDetails() {
           )}
         </div>
         {!ops.length ? (
-          <div className="p-4 sm:p-6 text-[#ECECEC]/80 dark:text-dark-text/80">Операции не распределены</div>
+          <div className="p-4 sm:p-6 text-[#ECECEC]/80 dark:text-dark-text/80">Операции отсутствуют</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full min-w-[520px]">
@@ -1295,9 +1269,10 @@ export default function OrderDetails() {
           </div>
         )}
       </div>
+      )}
       </div>
 
-      {showCompleteConfirm && (
+      {showOperationsSection && showCompleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-accent-3 dark:bg-dark-900 rounded-xl p-4 sm:p-6 max-w-md w-full border border-white/25 dark:border-white/25">
             <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
@@ -1348,11 +1323,21 @@ export default function OrderDetails() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Название</label>
+                  <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">ТЗ / Код модели</label>
                   <input
                     type="text"
-                    value={editForm.title}
-                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    value={editForm.tz_code}
+                    onChange={(e) => setEditForm({ ...editForm, tz_code: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Название модели</label>
+                  <input
+                    type="text"
+                    value={editForm.model_name}
+                    onChange={(e) => setEditForm({ ...editForm, model_name: e.target.value })}
                     className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                     required
                   />
@@ -1648,7 +1633,7 @@ export default function OrderDetails() {
               Удалить заказ?
             </h2>
             <p className="text-[#ECECEC]/90 dark:text-dark-text/80 mb-6">
-              Заказ «{order.title}» будет удалён безвозвратно. Все распределённые операции и связи будут удалены.
+              Заказ «{order.title}» будет удалён безвозвратно. Все связанные операции и данные будут удалены.
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -1669,6 +1654,17 @@ export default function OrderDetails() {
           </div>
         </div>
       )}
+
+      <ProcurementModal
+        open={showProcurementModal}
+        orderId={order.id}
+        onClose={() => setShowProcurementModal(false)}
+        onSaved={() => {
+          loadOrder();
+          setSuccessMsg('Закуп обновлён');
+          setTimeout(() => setSuccessMsg(''), 2000);
+        }}
+      />
     </div>
   );
 }

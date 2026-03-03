@@ -17,7 +17,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 
-export default function AIAssistant() {
+export default function AIAssistant({ embedded = false }) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -55,24 +55,30 @@ export default function AIAssistant() {
   })) || [];
 
   return (
-    <aside className="w-80 flex-shrink-0 flex flex-col bg-accent-3 dark:bg-dark-900 panel-right-border">
+    <aside
+      className={`flex flex-col bg-neon-surface ${
+        embedded
+          ? 'w-full h-full rounded-card border border-neon-border overflow-hidden'
+          : 'w-80 flex-shrink-0 panel-right-border'
+      }`}
+    >
       <div className="header-top flex items-center p-4">
-        <span className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text">ИИ Ассистент</span>
+        <span className="text-lg font-semibold text-neon-text">ИИ Ассистент</span>
       </div>
 
-      <div className="p-3 border-b border-white/20 dark:border-white/20">
+      <div className="p-3 border-b border-white/10">
         <textarea
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleAsk())}
           placeholder="Введите вопрос или выберите пример..."
-          className="w-full h-20 px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text text-sm resize-none focus:border-primary-500 focus:outline-none"
+          className="input-neon w-full h-20 px-3 py-2 text-sm resize-none"
           disabled={loading}
         />
         <button
           onClick={() => handleAsk()}
           disabled={loading || !query.trim()}
-          className="mt-2 w-full py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50"
+          className="mt-2 w-full py-2 rounded-btn bg-neon-accent text-black text-sm font-medium hover:bg-neon-accent2 disabled:opacity-50"
         >
           {loading ? 'Загрузка...' : 'Спросить'}
         </button>
@@ -82,7 +88,7 @@ export default function AIAssistant() {
               key={ex}
               onClick={() => handleAsk(ex)}
               disabled={loading}
-              className="px-2 py-1 rounded bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text/90 text-xs hover:bg-accent-1/40 dark:hover:bg-dark-3 disabled:opacity-50"
+              className="px-2 py-1 rounded-chip bg-neon-surface2 text-neon-text text-xs hover:shadow-neon disabled:opacity-50"
             >
               {ex}
             </button>
@@ -90,10 +96,10 @@ export default function AIAssistant() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-4 bg-accent-3 dark:bg-dark-900 min-h-0">
+      <div className="flex-1 overflow-auto p-3 space-y-4 bg-neon-surface min-h-0">
         {result && (
               <>
-                <p className="text-sm text-[#ECECEC] dark:text-dark-text">{result.summary}</p>
+                <p className="text-sm text-neon-text">{result.summary}</p>
 
                 {result.data?.length > 0 && (
                   <div className="overflow-x-auto">

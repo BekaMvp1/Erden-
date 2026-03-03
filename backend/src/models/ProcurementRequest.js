@@ -19,6 +19,19 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'Ожидает закуп',
     },
+    due_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    total_sum: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   }, {
     tableName: 'procurement_requests',
     timestamps: true,

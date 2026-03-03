@@ -2,8 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Светлая тема: текст #ECECEC, акценты #84934A #656D3F #492828 */
-/* Тёмная тема: текст #FDEB9E, акценты #000B58 #003161 #006A67 */
+/* Базовые токены неоновой тёмной темы */
 @layer base {
   *,
   *::before,
@@ -11,40 +10,48 @@
     box-sizing: border-box;
   }
   html {
-    color-scheme: light;
-    --color-primary-400: #9ca85a;
-    --color-primary-500: #84934A;
-    --color-primary-600: #656D3F;
-    --color-primary-700: #492828;
-    --accent-1: #84934A;
-    --accent-2: #656D3F;
-    --accent-3: #492828;
-    --text-primary: #ECECEC;
-    --bg-main: #656D3F;
-    --bg-sidebar: #492828;
+    color-scheme: dark;
+    --bg: #070708;
+    --bg2: #0b0c0e;
+    --surface: #101114;
+    --surface2: #14161a;
+    --text: #edeef0;
+    --muted: #a7adb6;
+    --border: rgba(255, 255, 255, 0.06);
+    --accent: #c7ff1a;
+    --accent2: #9bef00;
+    --danger: #ff4d4d;
+    --warn: #ffcc00;
+    --success: #4dff88;
+
+    --color-primary-400: #d6ff63;
+    --color-primary-500: #c7ff1a;
+    --color-primary-600: #9bef00;
+    --color-primary-700: #7ec700;
+    --accent-1: #101114;
+    --accent-2: #14161a;
+    --accent-3: #101114;
+    --text-primary: #edeef0;
+    --bg-main: #070708;
+    --bg-sidebar: #0b0c0e;
   }
   html.dark {
     color-scheme: dark;
-    --color-primary-400: #40c9c5;
-    --color-primary-500: #006A67;
-    --color-primary-600: #003161;
-    --color-primary-700: #000B58;
-    --accent-1: #000B58;
-    --accent-2: #003161;
-    --accent-3: #006A67;
-    --text-primary: #FDEB9E;
-    --bg-main: #000B58;
-    --bg-sidebar: #001a3d;
   }
 }
 
 body {
   @apply antialiased;
   color: var(--text-primary);
-  background-color: var(--bg-main);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(199, 255, 26, 0.08), transparent 38%),
+    radial-gradient(circle at 85% 0%, rgba(155, 239, 0, 0.06), transparent 32%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
   font-family: var(--app-font, system-ui, -apple-system, sans-serif);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Гарантия видимости текста на тёмном фоне */
@@ -93,6 +100,119 @@ html.dark .header-top {
 }
 html.dark .sidebar-header-border {
   border-right-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Унифицированные неоновые элементы интерфейса */
+.card-neon {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -20px 60px rgba(0, 0, 0, 0.6);
+}
+.card-neon:hover {
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -20px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(199, 255, 26, 0.25),
+    0 0 25px rgba(199, 255, 26, 0.12);
+}
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.btn-neon {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  transition: all 220ms ease;
+}
+
+.input-neon {
+  border-radius: 16px;
+  border: 0.5px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+.input-neon::placeholder {
+  color: var(--muted);
+}
+.input-neon:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(199, 255, 26, 0.25), 0 0 25px rgba(199, 255, 26, 0.12);
+}
+
+/* Единый тонкий border-box для всех полей ввода */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border-width: 0.5px !important;
+  border-style: solid;
+}
+
+/* Единая аккуратная палитра статусов для всех страниц */
+html {
+  --status-success-text: #d6ff63;
+  --status-success-bg: rgba(199, 255, 26, 0.16);
+  --status-success-border: rgba(199, 255, 26, 0.35);
+  --status-warn-text: #ffd67a;
+  --status-warn-bg: rgba(255, 196, 90, 0.16);
+  --status-warn-border: rgba(255, 196, 90, 0.32);
+  --status-danger-text: #ff9f9f;
+  --status-danger-bg: rgba(255, 122, 122, 0.16);
+  --status-danger-border: rgba(255, 122, 122, 0.32);
+}
+
+/* Success-группа: зелёный/лайм/изумрудный + прежний синий */
+[class*="text-green-"],
+[class*="text-emerald-"],
+[class*="text-lime-"],
+[class*="text-blue-"],
+[class*="text-sky-"] {
+  color: var(--status-success-text) !important;
+}
+[class*="bg-green-"],
+[class*="bg-emerald-"],
+[class*="bg-lime-"],
+[class*="bg-blue-"],
+[class*="bg-sky-"] {
+  background-color: var(--status-success-bg) !important;
+}
+[class*="border-green-"],
+[class*="border-emerald-"],
+[class*="border-lime-"],
+[class*="border-blue-"],
+[class*="border-sky-"] {
+  border-color: var(--status-success-border) !important;
+}
+
+/* Warning-группа: жёлтый/янтарный */
+[class*="text-amber-"],
+[class*="text-yellow-"] {
+  color: var(--status-warn-text) !important;
+}
+[class*="bg-amber-"],
+[class*="bg-yellow-"] {
+  background-color: var(--status-warn-bg) !important;
+}
+[class*="border-amber-"],
+[class*="border-yellow-"] {
+  border-color: var(--status-warn-border) !important;
+}
+
+/* Danger-группа: красный */
+[class*="text-red-"] {
+  color: var(--status-danger-text) !important;
+}
+[class*="bg-red-"] {
+  background-color: var(--status-danger-bg) !important;
+}
+[class*="border-red-"] {
+  border-color: var(--status-danger-border) !important;
 }
 /* Правая панель: линия как слева, но белая полупрозрачная */
 .panel-right-border {

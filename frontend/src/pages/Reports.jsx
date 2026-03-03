@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { NeonButton, NeonCard, NeonInput, NeonSelect, StatCard } from '../components/ui';
 
 /** Ссылка на Планирование с фильтрами (источник плана/факта) */
 function planningLink(workshopId, from, to, floorId, orderId) {
@@ -156,11 +157,6 @@ export default function Reports() {
     }
   };
 
-  const inputClass =
-    'px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text';
-  const selectClass =
-    'px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text';
-
   return (
     <div>
       <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -175,10 +171,10 @@ export default function Reports() {
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="block text-sm text-[#ECECEC]/80 mb-1">Цех</label>
-            <select
+            <NeonSelect
               value={workshopId}
               onChange={(e) => setWorkshopId(e.target.value)}
-              className={`${selectClass} min-w-[180px]`}
+              className="min-w-[180px]"
             >
               <option value="">Выберите цех</option>
               {workshops.map((w) => (
@@ -186,68 +182,66 @@ export default function Reports() {
                   {w.name}
                 </option>
               ))}
-            </select>
+            </NeonSelect>
           </div>
 
           <div>
             <label className="block text-sm text-[#ECECEC]/80 mb-1">Период</label>
             <div className="flex gap-2">
-              <button
-                type="button"
+              <NeonButton
                 onClick={() => handleQuickPeriod('today')}
-                className="px-3 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text text-sm hover:bg-accent-1/40"
+                variant="secondary"
+                className="px-3 py-2 text-sm"
               >
                 Сегодня
-              </button>
-              <button
-                type="button"
+              </NeonButton>
+              <NeonButton
                 onClick={() => handleQuickPeriod('week')}
-                className="px-3 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text text-sm hover:bg-accent-1/40"
+                variant="secondary"
+                className="px-3 py-2 text-sm"
               >
                 Неделя
-              </button>
-              <button
-                type="button"
+              </NeonButton>
+              <NeonButton
                 onClick={() => handleQuickPeriod('month')}
-                className="px-3 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text text-sm hover:bg-accent-1/40"
+                variant="secondary"
+                className="px-3 py-2 text-sm"
               >
                 Месяц
-              </button>
+              </NeonButton>
             </div>
           </div>
 
           <div>
             <label className="block text-sm text-[#ECECEC]/80 mb-1">Дата от</label>
-            <input
+            <NeonInput
               type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
-              className={inputClass}
             />
           </div>
           <div>
             <label className="block text-sm text-[#ECECEC]/80 mb-1">Дата до</label>
-            <input
+            <NeonInput
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              className={inputClass}
             />
           </div>
 
           <div>
             <label className="block text-sm text-[#ECECEC]/80 mb-1">Разрез отчёта</label>
-            <select
+            <NeonSelect
               value={reportType}
               onChange={(e) => setReportType(e.target.value)}
-              className={`${selectClass} min-w-[200px]`}
+              className="min-w-[200px]"
             >
               {REPORT_TYPES.map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label}
                 </option>
               ))}
-            </select>
+            </NeonSelect>
           </div>
         </div>
       </div>
@@ -259,9 +253,9 @@ export default function Reports() {
       )}
 
       {!canLoad && (
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-12 text-center text-[#ECECEC]/70">
+        <NeonCard className="p-12 text-center text-neon-muted">
           Выберите цех и период для отображения отчёта
-        </div>
+        </NeonCard>
       )}
 
       {canLoad && (
@@ -273,52 +267,22 @@ export default function Reports() {
               {/* KPI карточки */}
               {kpi && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">План</div>
-                    <div className="text-xl font-bold text-[#ECECEC]">{kpi.planned_sum}</div>
-                  </div>
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">Факт</div>
-                    <div className="text-xl font-bold text-[#ECECEC]">{kpi.actual_sum}</div>
-                  </div>
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">Выполнение %</div>
-                    <div
-                      className={`text-xl font-bold ${
-                        kpi.completion_percent >= 100
-                          ? 'text-green-400'
-                          : kpi.completion_percent < 80
-                            ? 'text-red-400'
-                            : 'text-amber-400'
-                      }`}
-                    >
-                      {kpi.completion_percent}%
-                    </div>
-                  </div>
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">Просроченные</div>
-                    <div className="text-xl font-bold text-[#ECECEC]">{kpi.overdue_orders}</div>
-                  </div>
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">Активные</div>
-                    <div className="text-xl font-bold text-[#ECECEC]">{kpi.active_orders}</div>
-                  </div>
-                  <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
-                    <div className="text-sm text-[#ECECEC]/60">Отставание по финишу</div>
-                    <div
-                      className={`text-xl font-bold ${
-                        kpi.finish_delay > 0 ? 'text-red-400' : 'text-[#ECECEC]'
-                      }`}
-                    >
-                      {kpi.finish_delay}
-                    </div>
-                  </div>
+                  <StatCard title="План" value={kpi.planned_sum} />
+                  <StatCard title="Факт" value={kpi.actual_sum} />
+                  <StatCard
+                    title="Выполнение %"
+                    value={`${kpi.completion_percent}%`}
+                    tone={kpi.completion_percent >= 100 ? 'success' : kpi.completion_percent < 80 ? 'danger' : 'warn'}
+                  />
+                  <StatCard title="Просроченные" value={kpi.overdue_orders} tone={kpi.overdue_orders > 0 ? 'danger' : 'default'} />
+                  <StatCard title="Активные" value={kpi.active_orders} />
+                  <StatCard title="Отставание по финишу" value={kpi.finish_delay} tone={kpi.finish_delay > 0 ? 'danger' : 'default'} />
                 </div>
               )}
 
               {/* Таблица по разрезу */}
               {tableData && tableData.length > 0 && (
-                <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 overflow-hidden">
+                <NeonCard className="overflow-hidden p-0">
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[400px]">
                       <thead>
@@ -518,18 +482,18 @@ export default function Reports() {
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </NeonCard>
               )}
 
               {tableData && tableData.length === 0 && (
-                <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-8 text-center text-[#ECECEC]/70">
+                <NeonCard className="p-8 text-center text-neon-muted">
                   Нет данных за выбранный период
-                </div>
+                </NeonCard>
               )}
 
               {/* График план/факт */}
               {planFactData && planFactData.length > 0 && (
-                <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
+                <NeonCard className="p-4">
                   <h3 className="text-sm font-semibold text-[#ECECEC] mb-4">
                     План / Факт по дням
                   </h3>
@@ -578,18 +542,16 @@ export default function Reports() {
                       </span>
                     </div>
                   </div>
-                </div>
+                </NeonCard>
               )}
 
               {/* Экспорт CSV */}
               <div className="no-print">
-                <button
-                  type="button"
+                <NeonButton
                   onClick={handleExportCsv}
-                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
                 >
                   Экспорт CSV
-                </button>
+                </NeonButton>
               </div>
             </div>
           )}

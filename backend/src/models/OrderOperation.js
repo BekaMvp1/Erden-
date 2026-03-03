@@ -46,6 +46,41 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    stage_key: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+    planned_qty: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    actual_qty: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    planned_start_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    planned_end_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    planned_days: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    actual_start_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    actual_end_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
     planned_total: {
       type: DataTypes.INTEGER,
       allowNull: true,

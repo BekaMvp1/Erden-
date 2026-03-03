@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
 
 const UNITS = ['РУЛОН', 'КГ', 'ТОННА', 'ШТ'];
 
@@ -87,53 +88,51 @@ export default function Warehouse() {
   return (
     <div>
       <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Склад</h1>
+        <h1 className="text-2xl font-bold text-neon-text">Склад</h1>
         {items.length > 0 && <PrintButton />}
       </div>
 
       {canEdit && (
         <div className="no-print mb-4">
-          <button
+          <NeonButton
             onClick={() => setShowAddItem(!showAddItem)}
-            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
           >
             {showAddItem ? 'Отмена' : 'Добавить позицию'}
-          </button>
+          </NeonButton>
         </div>
       )}
 
       {showAddItem && canEdit && (
-        <form onSubmit={handleAddItem} className="no-print mb-6 p-4 rounded-xl bg-accent-3/80 dark:bg-dark-900 border border-white/25 dark:border-white/25 flex gap-4 items-end">
+        <form onSubmit={handleAddItem} className="no-print mb-6 p-4 rounded-card card-neon flex gap-4 items-end">
           <div>
             <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Наименование</label>
-            <input
+            <NeonInput
               type="text"
               value={newItem.name}
               onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
               placeholder="Ткань, фурнитура..."
-              className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text min-w-[200px]"
+              className="min-w-[200px]"
             />
           </div>
           <div>
             <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Ед.изм</label>
-            <select
+            <NeonSelect
               value={newItem.unit}
               onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
-              className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
             >
               {UNITS.map((u) => (
                 <option key={u} value={u}>{u}</option>
               ))}
-            </select>
+            </NeonSelect>
           </div>
-          <button type="submit" className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
+          <NeonButton type="submit">
             Добавить
-          </button>
+          </NeonButton>
         </form>
       )}
 
       {/* Таблица остатков */}
-      <div className="print-area rounded-xl border border-white/25 dark:border-white/25 overflow-hidden">
+      <NeonCard className="print-area rounded-card overflow-hidden p-0">
         <h1 className="print-title print-only">Склад — остатки</h1>
         {loading ? (
           <div className="p-8 text-center text-[#ECECEC]/80 dark:text-dark-text/80">Загрузка...</div>
@@ -172,13 +171,13 @@ export default function Warehouse() {
             </tbody>
           </table>
         )}
-      </div>
+      </NeonCard>
 
       {/* Модальное окно приход/расход */}
       {showMovement && canEdit && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowMovement(null)}>
           <div
-            className="bg-accent-3 dark:bg-dark-900 rounded-xl border border-white/25 dark:border-white/25 p-6 max-w-md w-full"
+            className="card-neon rounded-card p-6 max-w-md w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
@@ -187,33 +186,30 @@ export default function Warehouse() {
             <form onSubmit={handleAddMovement} className="space-y-4">
               <div>
                 <label className="block text-sm text-[#ECECEC]/80 mb-1">Тип</label>
-                <select
+                <NeonSelect
                   value={movement.type}
                   onChange={(e) => setMovement({ ...movement, type: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                 >
                   <option value="ПРИХОД">Приход</option>
                   <option value="РАСХОД">Расход</option>
-                </select>
+                </NeonSelect>
               </div>
               <div>
                 <label className="block text-sm text-[#ECECEC]/80 mb-1">Количество</label>
-                <input
+                <NeonInput
                   type="number"
                   step="0.001"
                   value={movement.quantity}
                   onChange={(e) => setMovement({ ...movement, quantity: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                   required
                 />
               </div>
               {movement.type === 'РАСХОД' && (
                 <div>
                   <label className="block text-sm text-[#ECECEC]/80 mb-1">Заказ (опционально)</label>
-                  <select
+                  <NeonSelect
                     value={movement.order_id}
                     onChange={(e) => setMovement({ ...movement, order_id: e.target.value })}
-                    className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                   >
                     <option value="">— Без привязки —</option>
                     {orders.map((o) => (
@@ -221,29 +217,28 @@ export default function Warehouse() {
                         #{o.id} {o.Client?.name} — {o.title}
                       </option>
                     ))}
-                  </select>
+                  </NeonSelect>
                 </div>
               )}
               <div>
                 <label className="block text-sm text-[#ECECEC]/80 mb-1">Комментарий</label>
-                <input
+                <NeonInput
                   type="text"
                   value={movement.comment}
                   onChange={(e) => setMovement({ ...movement, comment: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
                 />
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
+                <NeonButton type="submit">
                   Сохранить
-                </button>
-                <button
+                </NeonButton>
+                <NeonButton
                   type="button"
                   onClick={() => setShowMovement(null)}
-                  className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
+                  variant="secondary"
                 >
                   Отмена
-                </button>
+                </NeonButton>
               </div>
             </form>
           </div>

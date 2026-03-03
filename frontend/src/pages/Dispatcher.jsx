@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getPriority, getBottleneckMap, getRecommendations } from '../features/planner/api';
+import { NeonButton, NeonCard, NeonInput } from '../components/ui';
 
 function getRiskColor(risk) {
   if (risk === 'HIGH') return 'text-red-400';
@@ -63,15 +64,15 @@ export default function Dispatcher() {
   if (error) {
     return (
       <div className="p-6">
-        <div className="bg-red-500/20 border border-red-500 rounded-lg p-4 text-red-400">
+        <div className="bg-red-500/20 border border-red-500 rounded-btn p-4 text-red-400">
           Ошибка: {error}
         </div>
-        <button
+        <NeonButton
           onClick={loadData}
-          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          className="mt-4"
         >
           Повторить
-        </button>
+        </NeonButton>
       </div>
     );
   }
@@ -79,26 +80,25 @@ export default function Dispatcher() {
   return (
     <div className="p-6">
       <div className="mb-6 flex flex-wrap items-center gap-4">
-        <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">
+          <h1 className="text-2xl font-bold text-neon-text">
           Планировщик
         </h1>
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-400">Дней:</label>
-          <input
+          <NeonInput
             type="number"
             min={1}
             max={90}
             value={days}
             onChange={(e) => setDays(Number(e.target.value) || 7)}
-            className="w-20 px-3 py-2 rounded-lg bg-accent-1/20 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+            className="w-20 px-3 py-2"
           />
-          <button
+          <NeonButton
             onClick={loadData}
             disabled={loading}
-            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
           >
             Обновить
-          </button>
+          </NeonButton>
         </div>
       </div>
 
@@ -107,7 +107,7 @@ export default function Dispatcher() {
         <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-3">
           Приоритеты заказов
         </h2>
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 overflow-hidden">
+        <NeonCard className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>
@@ -157,7 +157,7 @@ export default function Dispatcher() {
           {priority.length === 0 && (
             <div className="p-6 text-center text-gray-400">Нет данных</div>
           )}
-        </div>
+        </NeonCard>
       </div>
 
       {/* Блок 2 — Узкие места */}
@@ -165,7 +165,7 @@ export default function Dispatcher() {
         <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-3">
           Узкие места
         </h2>
-        <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 overflow-hidden">
+        <NeonCard className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[400px]">
               <thead>
@@ -198,7 +198,7 @@ export default function Dispatcher() {
           {bottleneckMap.length === 0 && (
             <div className="p-6 text-center text-gray-400">Нет данных</div>
           )}
-        </div>
+        </NeonCard>
       </div>
 
       {/* Блок 3 — Рекомендации */}
@@ -207,7 +207,7 @@ export default function Dispatcher() {
           Рекомендации
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
+          <NeonCard className="p-4">
             <h3 className="text-sm font-medium text-[#ECECEC]/90 mb-2">Топ рисков</h3>
             <ul className="space-y-2">
               {(recommendations?.top_risks || []).map((r, i) => (
@@ -226,8 +226,8 @@ export default function Dispatcher() {
                 <li className="text-gray-400 text-sm">Нет рисков</li>
               )}
             </ul>
-          </div>
-          <div className="bg-accent-3/80 dark:bg-dark-900 rounded-xl border border-white/25 p-4">
+          </NeonCard>
+          <NeonCard className="p-4">
             <h3 className="text-sm font-medium text-[#ECECEC]/90 mb-2">Рекомендации по перемещению</h3>
             <ul className="space-y-2">
               {(recommendations?.move_suggestions || []).map((s, i) => (
@@ -243,7 +243,7 @@ export default function Dispatcher() {
                 <li className="text-gray-400 text-sm">Нет рекомендаций</li>
               )}
             </ul>
-          </div>
+          </NeonCard>
         </div>
       </div>
     </div>

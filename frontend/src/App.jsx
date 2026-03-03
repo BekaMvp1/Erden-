@@ -12,7 +12,6 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import CreateOrder from "./pages/CreateOrder";
 import OrderDetails from "./pages/OrderDetails";
-import PlanningAssign from "./pages/PlanningAssign";
 import Planning from "./pages/Planning";
 import Procurement from "./pages/Procurement";
 import Cutting from "./pages/Cutting";
@@ -23,6 +22,8 @@ import References from "./pages/References";
 import Finance2026 from "./pages/Finance2026";
 import Settings from "./pages/Settings";
 import Dispatcher from "./pages/Dispatcher";
+import Assistant from "./pages/Assistant";
+import OrdersBoard from "./pages/OrdersBoard";
 
 export default function App() {
   return (
@@ -41,9 +42,9 @@ export default function App() {
                 }
               >
                 <Route index element={<Dashboard />} />
+                <Route path="board" element={<OrdersBoard />} />
                 <Route path="orders/create" element={<CreateOrder />} />
                 <Route path="orders/:id" element={<OrderDetails />} />
-                <Route path="planning/assign" element={<PlanningAssign />} />
                 <Route path="planning" element={<Planning />} />
                 <Route path="procurement" element={<Procurement />} />
                 <Route path="cutting" element={<Cutting />} />
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="references" element={<References />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="dispatcher" element={<Dispatcher />} />
+                <Route path="assistant" element={<Assistant />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

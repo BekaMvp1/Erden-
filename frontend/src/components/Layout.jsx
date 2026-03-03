@@ -5,9 +5,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
 import { api } from '../api';
-import AIAssistant from './AIAssistant';
 import DashboardSummary from './DashboardSummary';
 
 const ROLE_LABELS = {
@@ -18,6 +16,11 @@ const ROLE_LABELS = {
 };
 
 const NAV_ICONS = {
+  board: (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18M6 7v10m6-10v10m6-10v10" />
+    </svg>
+  ),
   orders: (
     <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -26,11 +29,6 @@ const NAV_ICONS = {
   create: (
     <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-    </svg>
-  ),
-  assign: (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
     </svg>
   ),
   planning: (
@@ -84,13 +82,17 @@ const NAV_ICONS = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
     </svg>
   ),
+  assistant: (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 3 3-1 3-1m6-9a9 9 0 11-18 0 9 9 0 0118 0zm-4.5 0a4.5 4.5 0 10-9 0 4.5 4.5 0 009 0z" />
+    </svg>
+  ),
 };
 
 const CUTTING_DEFAULT = ['Аксы', 'Аутсорс', 'Наш цех'];
 
 export default function Layout() {
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -100,7 +102,10 @@ export default function Layout() {
   const [connectionError, setConnectionError] = useState(false);
 
   const isReferences = location.pathname === '/references';
+  const isBoard = location.pathname === '/board';
+  const isAssistant = location.pathname === '/assistant';
   const isCutting = location.pathname.startsWith('/cutting');
+  const shouldShowSummary = !isReferences && !isBoard && !isAssistant;
   // Аксы и Аутсорс — по умолчанию; остальные — из справочника (без дублей)
   const cuttingMenuItems = [
     ...CUTTING_DEFAULT,
@@ -114,7 +119,7 @@ export default function Layout() {
   }, [user?.role]);
 
   useEffect(() => {
-    if (!isReferences) {
+    if (shouldShowSummary) {
       setSummaryLoading(true);
       setConnectionError(false);
       api.dashboard
@@ -130,26 +135,27 @@ export default function Layout() {
           setConnectionError(true);
         });
     }
-  }, [isReferences]);
+  }, [shouldShowSummary]);
 
   const navItems = [
+    { to: '/board', label: 'Панель заказов', icon: 'board' },
     { to: '/', label: 'Заказы', icon: 'orders', end: true },
     ...(user?.role !== 'operator' ? [{ to: '/orders/create', label: 'Создать заказ', icon: 'create' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/procurement', label: 'Закуп', icon: 'procurement' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems }] : []),
     { to: '/floor-tasks', label: 'Задачи по этажам', icon: 'floorTasks' },
     ...(user?.role !== 'operator' ? [{ to: '/warehouse', label: 'Склад', icon: 'warehouse' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/planning/assign', label: 'Распределение', icon: 'assign' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/planning', label: 'Планирование', icon: 'planning', end: true }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/reports', label: 'Отчёты', icon: 'reports' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/dispatcher', label: 'Планировщик', icon: 'dispatcher' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/finance', label: 'Финансы', icon: 'finance' }] : []),
+    { to: '/assistant', label: 'ИИ Ассистент', icon: 'assistant' },
     { to: '/references', label: 'Справочники', icon: 'references' },
     { to: '/settings', label: 'Настройки', icon: 'settings' },
   ];
 
   return (
-    <div className="flex h-screen bg-[#656D3F] dark:bg-[#000610] overflow-hidden text-[#FDEB9E]">
+    <div className="flex h-screen bg-neon-bg text-neon-text overflow-hidden">
       {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div
@@ -161,12 +167,12 @@ export default function Layout() {
 
       {/* Sidebar — скрыт на мобильном, выезжает по кнопке */}
       <aside
-        className={`fixed md:relative inset-y-0 left-0 z-50 w-64 md:w-56 bg-[#492828] dark:bg-[#000B58] sidebar-header-border flex flex-col transform transition-transform duration-200 ease-out ${
+        className={`fixed md:relative inset-y-0 left-0 z-50 w-64 md:w-56 bg-neon-bg2 sidebar-header-border flex flex-col transform transition-transform duration-200 ease-out ${
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
         <div className="header-top flex items-center p-4">
-          <h1 className="text-lg font-semibold text-[#FDEB9E]">Швейная фабрика</h1>
+          <h1 className="text-lg font-semibold text-neon-text">Швейная фабрика</h1>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map(({ to, label, icon, end, dropdown }) =>
@@ -177,7 +183,7 @@ export default function Layout() {
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
                     isCutting
                       ? 'bg-primary-600 text-white'
-                      : 'text-[#FDEB9E]/90 hover:bg-white/10 hover:text-[#FDEB9E]'
+                      : 'text-neon-text/85 hover:bg-white/5 hover:text-neon-text'
                   }`}
                 >
                   {NAV_ICONS[icon]}
@@ -197,7 +203,7 @@ export default function Layout() {
                           `block px-3 py-1.5 rounded text-sm ${
                             isActive
                               ? 'bg-primary-600/80 text-white'
-                              : 'text-[#FDEB9E]/80 hover:bg-white/10'
+                              : 'text-neon-muted hover:bg-white/5'
                           }`
                         }
                       >
@@ -217,7 +223,7 @@ export default function Layout() {
                   `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
                     isActive
                       ? 'bg-primary-600 text-white'
-                      : 'text-[#FDEB9E]/90 hover:bg-white/10 hover:text-[#FDEB9E]'
+                      : 'text-neon-text/85 hover:bg-white/5 hover:text-neon-text'
                   }`
                 }
               >
@@ -231,10 +237,10 @@ export default function Layout() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <header className="header-top bg-accent-3 dark:bg-dark-900 flex items-center justify-between px-3 md:px-6 gap-2">
+        <header className="header-top bg-neon-surface flex items-center justify-between px-3 md:px-6 gap-2">
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="p-2 rounded-lg md:hidden hover:bg-white/10 text-[#FDEB9E]"
+            className="p-2 rounded-lg md:hidden hover:bg-white/10 text-neon-text"
             aria-label="Меню"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -243,26 +249,7 @@ export default function Layout() {
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-[#FDEB9E] transition-colors duration-300 ease-out"
-              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-            >
-              {theme === 'dark' ? (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                </svg>
-              )}
-            </button>
-            <span className="text-xs md:text-sm text-[#FDEB9E] truncate max-w-[120px] md:max-w-none">
+            <span className="text-xs md:text-sm text-neon-text truncate max-w-[120px] md:max-w-none">
               {user?.name}
               {user?.role && (ROLE_LABELS[user.role] || user.role) !== user?.name && (
                 <span className="hidden sm:inline"> • {ROLE_LABELS[user.role] || user.role}</span>
@@ -270,20 +257,20 @@ export default function Layout() {
             </span>
             <button
               onClick={logout}
-              className="px-2 md:px-3 py-1.5 text-xs md:text-sm rounded-lg bg-white/10 text-[#FDEB9E] hover:bg-white/20 transition-colors duration-300 ease-out"
+              className="btn-neon px-2 md:px-3 py-1.5 text-xs md:text-sm bg-neon-surface2 text-neon-text hover:shadow-neon"
             >
               Выход
             </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-[#656D3F] dark:bg-[#000610]">
+        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-transparent">
           {connectionError && (
             <div className="mb-4 p-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400">
               <strong>Сервер не отвечает.</strong> Запустите backend: <code className="bg-black/20 px-1 rounded">cd backend && npm run dev</code>
             </div>
           )}
-          {!isReferences && (
+          {shouldShowSummary && (
             <DashboardSummary data={summary} loading={summaryLoading} />
           )}
           <div key={location.pathname} className="animate-page-enter">
@@ -292,10 +279,6 @@ export default function Layout() {
         </main>
       </div>
 
-      {/* Правая панель — ИИ Ассистент (скрыта на мобильном) */}
-      <div className="hidden lg:flex lg:flex-col lg:min-h-0 bg-accent-3 dark:bg-dark-900">
-        <AIAssistant />
-      </div>
     </div>
   );
 }
