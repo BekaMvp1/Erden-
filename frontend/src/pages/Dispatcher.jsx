@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getPriority, getBottleneckMap, getRecommendations } from '../features/planner/api';
 import { NeonButton, NeonCard, NeonInput } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 function getRiskColor(risk) {
   if (risk === 'HIGH') return 'text-red-400';
@@ -79,10 +80,11 @@ export default function Dispatcher() {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex flex-wrap items-center gap-4">
+      <div className="no-print mb-6 flex flex-wrap items-center gap-4">
           <h1 className="text-2xl font-bold text-neon-text">
           Планировщик
         </h1>
+          <PrintButton />
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-400">Дней:</label>
           <NeonInput

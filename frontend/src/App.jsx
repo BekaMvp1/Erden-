@@ -15,8 +15,9 @@ import OrderDetails from "./pages/OrderDetails";
 import Planning from "./pages/Planning";
 import Procurement from "./pages/Procurement";
 import Cutting from "./pages/Cutting";
-import FloorTasks from "./pages/FloorTasks";
 import Warehouse from "./pages/Warehouse";
+import Qc from "./pages/Qc";
+import Shipments from "./pages/Shipments";
 import Reports from "./pages/Reports";
 import References from "./pages/References";
 import Finance2026 from "./pages/Finance2026";
@@ -49,8 +50,9 @@ export default function App() {
                 <Route path="procurement" element={<Procurement />} />
                 <Route path="cutting" element={<Cutting />} />
                 <Route path="cutting/:type" element={<Cutting />} />
-                <Route path="floor-tasks" element={<FloorTasks />} />
                 <Route path="warehouse" element={<Warehouse />} />
+                <Route path="qc" element={<Qc />} />
+                <Route path="shipments" element={<Shipments />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="finance" element={<Finance2026 />} />
                 <Route path="references" element={<References />} />

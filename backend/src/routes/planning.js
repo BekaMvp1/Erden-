@@ -10,6 +10,8 @@ const { Op } = require('sequelize');
 const db = require('../models');
 const { logAudit } = require('../utils/audit');
 const flowCalculatorController = require('../controllers/flowCalculatorController');
+const { WORKING_DAYS_PER_WEEK, getWorkingDaysInRange, getWeekStart } = require('../utils/planningUtils');
+const { syncWeeklyCacheFromDaily, checkWeeklyIntegrity, recalculateCarry } = require('../utils/planningSync');
 
 const router = express.Router();
 
@@ -49,12 +51,12 @@ router.get('/floors', async (req, res, next) => {
 });
 
 /**
- * GET /api/planning/table?workshop_id=&from=&to=&floor_id=
- * Таблица плана: заказчик, модель, даты, план, факт, итого
+ * GET /api/planning/table?workshop_id=&from=&to=&floor_id=&period_id=
+ * Таблица плана: заказчик, модель, даты, план, факт, итого. period_id опционален (фильтр по периоду).
  */
 router.get('/table', async (req, res, next) => {
   try {
-    const { workshop_id, from, to, floor_id } = req.query;
+    const { workshop_id, from, to, floor_id, period_id } = req.query;
     if (!workshop_id) return res.status(400).json({ error: 'Укажите workshop_id' });
     if (!from || !to) return res.status(400).json({ error: 'Укажите from и to' });
 
@@ -65,6 +67,7 @@ router.get('/table', async (req, res, next) => {
       workshop_id: Number(workshop_id),
       date: { [Op.between]: [from, to] },
     };
+    if (period_id) planWhere.period_id = Number(period_id);
     if (workshop.floors_count === 4 && floor_id && floor_id !== 'all') {
       planWhere.floor_id = Number(floor_id);
     } else if (workshop.floors_count === 1) {
@@ -177,12 +180,12 @@ router.get('/table', async (req, res, next) => {
 });
 
 /**
- * GET /api/planning/model-table?workshop_id=&order_id=&from=&to=&floor_id=
+ * GET /api/planning/model-table?workshop_id=&order_id=&from=&to=&floor_id=&period_id=
  * Таблица плана по выбранной модели (заказу): даты, план, факт, итого.
  */
 router.get('/model-table', async (req, res, next) => {
   try {
-    const { workshop_id, order_id, from, to, floor_id } = req.query;
+    const { workshop_id, order_id, from, to, floor_id, period_id } = req.query;
     if (!workshop_id || !order_id || !from || !to) {
       return res.status(400).json({ error: 'Укажите workshop_id, order_id, from, to' });
     }
@@ -206,6 +209,7 @@ router.get('/model-table', async (req, res, next) => {
       order_id: Number(order_id),
       date: { [Op.between]: [from, to] },
     };
+    if (period_id) planWhere.period_id = Number(period_id);
     let floorInfo = null;
     if (workshop.floors_count === 4) {
       const fid = floor_id && floor_id !== 'all' ? Number(floor_id) : null;
@@ -299,29 +303,537 @@ router.put('/day', async (req, res, next) => {
       effectiveFloorId = null; // Игнорируем переданный floor_id
     }
 
+    const dateStr = String(date).slice(0, 10);
+    const period = await requireActivePeriodForDate(db, dateStr);
+
     const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
-    const actual = Math.max(0, parseInt(actual_qty, 10) || 0);
     const notesVal = typeof notes === 'string' ? notes.trim() || null : null;
 
     const [row, created] = await db.ProductionPlanDay.findOrCreate({
       where: {
+        period_id: period.id,
         order_id: Number(order_id),
-        date: String(date).slice(0, 10),
+        date: dateStr,
         workshop_id: Number(workshop_id),
         floor_id: effectiveFloorId,
       },
       defaults: {
         planned_qty: planned,
-        actual_qty: actual,
+        actual_qty: 0,
         notes: notesVal,
       },
     });
 
     if (!created) {
-      await row.update({ planned_qty: planned, actual_qty: actual, notes: notesVal });
+      await row.update({ planned_qty: planned, notes: notesVal });
     }
 
+    await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), [dateStr], period.id);
+    await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id);
+
     res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PUT /api/planning/daily — body: { floor_id, row_key, date, qty } или { order_id, workshop_id, date, planned_qty } */
+router.put('/daily', async (req, res, next) => {
+  const body = { ...req.body };
+  if (body.row_key != null) body.order_id = body.row_key;
+  if (body.qty != null) body.planned_qty = body.qty;
+  try {
+    if (req.user?.role === 'operator') return res.status(403).json({ error: 'Оператор не может редактировать план' });
+    let { order_id, workshop_id, date, floor_id, planned_qty, notes } = body;
+    if (order_id && !workshop_id) {
+      const ord = await db.Order.findByPk(order_id);
+      if (ord) workshop_id = ord.workshop_id;
+    }
+    if (!order_id || !workshop_id || !date) return res.status(400).json({ error: 'Укажите order_id (row_key), date и workshop_id (или row_key для заказа)' });
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+    let effectiveFloorId = workshop.floors_count === 4 && floor_id != null && floor_id !== 'all' ? Number(floor_id) : null;
+    const dateStr = String(date).slice(0, 10);
+    const period = await requireActivePeriodForDate(db, dateStr);
+    const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
+    const notesVal = typeof notes === 'string' ? notes.trim() || null : null;
+    const [row, created] = await db.ProductionPlanDay.findOrCreate({
+      where: { period_id: period.id, order_id: Number(order_id), date: dateStr, workshop_id: Number(workshop_id), floor_id: effectiveFloorId },
+      defaults: { planned_qty: planned, actual_qty: 0, notes: notesVal },
+    });
+    if (!created) await row.update({ planned_qty: planned, notes: notesVal });
+    await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), [dateStr], period.id);
+    await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id);
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== Мощность ==========
+
+/**
+ * PUT /api/planning/capacity
+ * Сохранение мощности на неделю для этажа
+ */
+router.put('/capacity', async (req, res, next) => {
+  try {
+    if (req.user?.role === 'operator') {
+      return res.status(403).json({ error: 'Оператор не может редактировать мощность' });
+    }
+    const { workshop_id, floor_id, week_start, capacity_week } = req.body;
+    if (!workshop_id || !week_start) {
+      return res.status(400).json({ error: 'Укажите workshop_id, week_start' });
+    }
+    const cap = Math.max(0, parseFloat(capacity_week) || 0);
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+    const floorId = workshop.floors_count === 4 && floor_id != null && floor_id !== ''
+      ? Number(floor_id)
+      : null;
+
+    const [row] = await db.WeeklyCapacity.findOrCreate({
+      where: {
+        workshop_id: Number(workshop_id),
+        building_floor_id: floorId,
+        week_start: String(week_start).slice(0, 10),
+      },
+      defaults: { capacity_week: cap },
+    });
+    await row.update({ capacity_week: cap });
+    res.json({ ok: true, capacity_week: cap });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ========== Периоды планирования (месяцы) ==========
+
+/**
+ * Найти или создать период по году и месяцу.
+ * При создании: перенос остатка (carry) из прошлого периода в первую неделю нового.
+ */
+async function getOrCreatePeriodForMonth(db, year, month, transaction = null) {
+  const opts = transaction ? { transaction } : {};
+  let period = await db.PlanningPeriod.findOne({
+    where: { year, month },
+    ...opts,
+  });
+  if (period) return { period, created: false };
+
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  period = await db.PlanningPeriod.create(
+    { year, month, start_date: startDate, end_date: endDate, status: 'ACTIVE' },
+    opts
+  );
+
+  const prev = await db.PlanningPeriod.findOne({
+    where: { start_date: { [Op.lt]: startDate } },
+    order: [['start_date', 'DESC']],
+    ...opts,
+  });
+  if (!prev) return { period, created: true };
+
+  const prevPlanDays = await db.ProductionPlanDay.findAll({
+    where: {
+      period_id: prev.id,
+      date: { [Op.between]: [prev.start_date, prev.end_date] },
+    },
+    attributes: ['order_id', 'floor_id', 'workshop_id', 'planned_qty', 'actual_qty'],
+    ...opts,
+  });
+  const byOrderFloor = {};
+  for (const r of prevPlanDays) {
+    const key = `${r.order_id}_${r.floor_id ?? 0}`;
+    if (!byOrderFloor[key]) byOrderFloor[key] = { order_id: r.order_id, floor_id: r.floor_id, workshop_id: r.workshop_id, planned: 0, fact: 0 };
+    byOrderFloor[key].planned += r.planned_qty || 0;
+    byOrderFloor[key].fact += r.actual_qty || 0;
+  }
+
+  const firstWeekStart = getWeekStart(startDate);
+  for (const key of Object.keys(byOrderFloor)) {
+    const row = byOrderFloor[key];
+    const carry = Math.max(0, row.planned - row.fact);
+    if (carry <= 0) continue;
+    const [rec] = await db.WeeklyCarry.findOrCreate({
+      where: {
+        period_id: period.id,
+        workshop_id: row.workshop_id,
+        building_floor_id: row.floor_id,
+        week_start: firstWeekStart,
+        row_key: row.order_id,
+      },
+      defaults: { carry_qty: carry },
+      ...opts,
+    });
+    if (rec) await rec.update({ carry_qty: carry }, opts);
+  }
+  return { period, created: true };
+}
+
+/** GET /api/planning/periods — список периодов для переключателя месяцев */
+router.get('/periods', async (req, res, next) => {
+  try {
+    const periods = await db.PlanningPeriod.findAll({
+      order: [['year', 'ASC'], ['month', 'ASC']],
+      attributes: ['id', 'year', 'month', 'start_date', 'end_date', 'status', 'created_at'],
+    });
+    res.json(periods);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/planning/periods/close — закрыть период. body: { period_id } или query period_id */
+router.post('/periods/close', async (req, res, next) => {
+  try {
+    if (req.user?.role === 'operator') return res.status(403).json({ error: 'Оператор не может закрывать период' });
+    const periodId = req.body.period_id ?? req.query.period_id;
+    if (!periodId) return res.status(400).json({ error: 'Укажите period_id' });
+    const period = await db.PlanningPeriod.findByPk(periodId);
+    if (!period) return res.status(404).json({ error: 'Период не найден' });
+    await period.update({ status: 'CLOSED' });
+    res.json({ ok: true, period: { id: period.id, status: period.status } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Получить период по дате; если период закрыт — бросить ошибку (для редактирования). */
+async function requireActivePeriodForDate(db, dateStr) {
+  const [y, m] = dateStr.slice(0, 10).split('-').map(Number);
+  const result = await getOrCreatePeriodForMonth(db, y, m);
+  if (result.period.status !== 'ACTIVE') {
+    const err = new Error('Период закрыт, редактирование недоступно');
+    err.status = 403;
+    err.code = 'PERIOD_CLOSED';
+    throw err;
+  }
+  return result.period;
+}
+
+// ========== Недельное планирование ==========
+
+/**
+ * Возвращает список недель месяца (week_start, week_end)
+ * Неделя = понедельник..воскресенье. Включаем все недели, пересекающиеся с месяцем.
+ */
+function getWeeksOfMonth(year, month) {
+  const weeks = [];
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+  let d = new Date(firstDay);
+  const dayOfWeek = d.getDay();
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  d.setDate(d.getDate() + diffToMonday);
+  while (d <= lastDay) {
+    const weekEnd = new Date(d);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weeks.push({
+      week_start: d.toISOString().slice(0, 10),
+      week_end: weekEnd.toISOString().slice(0, 10),
+    });
+    d.setDate(d.getDate() + 7);
+  }
+  return weeks;
+}
+
+/**
+ * GET /api/planning?period_id= или ?month=YYYY-MM&workshop_id=&floor_id=
+ * Алиас: те же параметры, что и /weekly.
+ */
+router.get('/', (req, res, next) => {
+  req.url = '/weekly';
+  return router.handle(req, res, next);
+});
+
+/**
+ * GET /api/planning/weekly?period_id= или ?month=YYYY-MM&workshop_id=&floor_id=
+ * Недельное планирование по периоду. period_id приоритетнее; иначе по month создаётся/находится период.
+ */
+router.get('/weekly', async (req, res, next) => {
+  try {
+    const { period_id, month, workshop_id, floor_id } = req.query;
+    if (!workshop_id) {
+      return res.status(400).json({ error: 'Укажите workshop_id и period_id или month (YYYY-MM)' });
+    }
+
+    let period;
+    if (period_id) {
+      period = await db.PlanningPeriod.findByPk(period_id);
+      if (!period) return res.status(404).json({ error: 'Период не найден' });
+    } else if (month) {
+      const [y, m] = month.split('-').map(Number);
+      if (!y || !m || m < 1 || m > 12) return res.status(400).json({ error: 'Некорректный месяц' });
+      const result = await getOrCreatePeriodForMonth(db, y, m);
+      period = result.period;
+    } else {
+      return res.status(400).json({ error: 'Укажите period_id или month' });
+    }
+
+    const y = period.year;
+    const m = period.month;
+    const monthStr = `${y}-${String(m).padStart(2, '0')}`;
+    const firstDay = period.start_date;
+    const lastDate = period.end_date;
+
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+
+    let effectiveFloorId = null;
+    if (workshop.floors_count === 4) {
+      if (floor_id && floor_id !== 'all') {
+        const fid = Number(floor_id);
+        if (fid >= 1 && fid <= 4) effectiveFloorId = fid;
+      }
+      if (effectiveFloorId == null) {
+        return res.status(400).json({ error: 'Для цеха «Наш цех» выберите этаж (floor_id 1–4)' });
+      }
+    }
+
+    const weeks = getWeeksOfMonth(y, m);
+
+    const ordersWhere = { workshop_id: Number(workshop_id) };
+    if (effectiveFloorId != null) {
+      ordersWhere[Op.or] = [
+        { building_floor_id: effectiveFloorId },
+        { building_floor_id: null },
+      ];
+    }
+    const orders = await db.Order.findAll({
+      where: ordersWhere,
+      include: [{ model: db.Client, as: 'Client' }],
+      order: [[db.Client, 'name', 'ASC'], ['title', 'ASC']],
+    });
+
+    const rowKeys = orders.map((o) => o.id);
+
+    const capacityWhere = {
+      workshop_id: Number(workshop_id),
+      week_start: { [Op.in]: weeks.map((w) => w.week_start) },
+    };
+    capacityWhere.building_floor_id = effectiveFloorId;
+    const capacities = await db.WeeklyCapacity.findAll({ where: capacityWhere });
+    const capacityByWeek = {};
+    for (const c of capacities) {
+      capacityByWeek[c.week_start] = parseFloat(c.capacity_week) || 0;
+    }
+
+    const planDayWhere = {
+      period_id: period.id,
+      workshop_id: Number(workshop_id),
+      order_id: { [Op.in]: rowKeys },
+      date: { [Op.between]: [firstDay, lastDate] },
+    };
+    planDayWhere.floor_id = effectiveFloorId;
+    const planDays = await db.ProductionPlanDay.findAll({
+      where: planDayWhere,
+      attributes: ['order_id', 'date', 'planned_qty', 'actual_qty'],
+    });
+
+    await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id);
+
+    // План (manual) и факт по (order_id, week_start): агрегация из daily
+    const manualByOrderWeek = {};
+    const factByOrderWeek = {};
+    for (const w of weeks) {
+      const wStart = new Date(w.week_start + 'T12:00:00');
+      const wEnd = new Date(w.week_end + 'T12:00:00');
+      for (const oid of rowKeys) {
+        let planSum = 0;
+        let factSum = 0;
+        for (const pd of planDays) {
+          if (pd.order_id !== oid) continue;
+          const d = new Date(pd.date + 'T12:00:00');
+          if (d >= wStart && d <= wEnd) {
+            planSum += pd.planned_qty || 0;
+            factSum += pd.actual_qty || 0;
+          }
+        }
+        const pk = `${oid}_${w.week_start}`;
+        manualByOrderWeek[pk] = planSum;
+        factByOrderWeek[pk] = factSum;
+      }
+    }
+
+    const carryRows = await db.WeeklyCarry.findAll({
+      where: {
+        period_id: period.id,
+        workshop_id: Number(workshop_id),
+        building_floor_id: effectiveFloorId,
+        row_key: { [Op.in]: rowKeys },
+        week_start: { [Op.in]: weeks.map((w) => w.week_start) },
+      },
+    });
+    const carryByKey = {};
+    for (const c of carryRows) {
+      carryByKey[`${c.row_key}_${c.week_start}`] = parseFloat(c.carry_qty) || 0;
+    }
+
+    // Собираем rows: manual_week, carry_week, total_week, fact_week
+    const byCustomer = new Map();
+    for (const order of orders) {
+      const cname = order.Client?.name || '—';
+      if (!byCustomer.has(cname)) {
+        byCustomer.set(cname, []);
+      }
+      const items = [];
+      for (const w of weeks) {
+        const pk = `${order.id}_${w.week_start}`;
+        const manual_week = manualByOrderWeek[pk] || 0;
+        const carry_week = carryByKey[pk] || 0;
+        const total_week = manual_week + carry_week;
+        const fact_qty = factByOrderWeek[pk] || 0;
+        const remainder = Math.max(0, total_week - fact_qty);
+        items.push({
+          week_start: w.week_start,
+          week_end: w.week_end,
+          planned_manual: manual_week,
+          planned_carry: carry_week,
+          planned_total: total_week,
+          fact_qty,
+          remainder,
+          manual_week,
+          carry_week,
+          total_week,
+          fact_week: fact_qty,
+        });
+      }
+      const month_plan = items.reduce((s, x) => s + x.planned_total, 0);
+      const month_fact = items.reduce((s, x) => s + x.fact_qty, 0);
+      byCustomer.get(cname).push({
+        order_id: order.id,
+        order_title: order.title,
+        model_name: order.model_name || order.title,
+        items,
+        month_plan,
+        month_fact,
+      });
+    }
+
+    const rows = [];
+    for (const [customer_name, ordersList] of byCustomer.entries()) {
+      const customer_plan = ordersList.reduce((s, o) => s + o.month_plan, 0);
+      const customer_fact = ordersList.reduce((s, o) => s + o.month_fact, 0);
+      rows.push({
+        customer_name,
+        orders: ordersList,
+        customer_plan,
+        customer_fact,
+      });
+    }
+
+    // Итоги по неделям (load = сумма total_week по строкам)
+    const weekTotals = weeks.map((w) => {
+      let load_week = 0;
+      for (const order of orders) {
+        const pk = `${order.id}_${w.week_start}`;
+        const manual_week = manualByOrderWeek[pk] || 0;
+        const carry_week = carryByKey[pk] || 0;
+        load_week += manual_week + carry_week;
+      }
+      const capacity_week = capacityByWeek[w.week_start] || 0;
+      const utilization = capacity_week > 0 ? (load_week / capacity_week) * 100 : 0;
+      return {
+        week_start: w.week_start,
+        week_end: w.week_end,
+        load_week,
+        capacity_week,
+        utilization: Math.round(utilization * 10) / 10,
+      };
+    });
+
+    const month_plan = rows.reduce((s, r) => s + r.customer_plan, 0);
+    const month_fact = rows.reduce((s, r) => s + r.customer_fact, 0);
+    const load_month = weekTotals.reduce((s, w) => s + w.load_week, 0);
+
+    res.json({
+      workshop: { id: workshop.id, name: workshop.name, floors_count: workshop.floors_count },
+      floor_id: effectiveFloorId,
+      period: { id: period.id, year: period.year, month: period.month, start_date: period.start_date, end_date: period.end_date, status: period.status },
+      month: monthStr,
+      weeks,
+      week_totals: weekTotals,
+      rows,
+      totals: {
+        month_plan,
+        month_fact,
+        load_month,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/planning/weekly/manual
+ * Изменение недели обновляет daily_plan (распределение по рабочим дням недели)
+ */
+router.put('/weekly/manual', async (req, res, next) => {
+  try {
+    if (req.user?.role === 'operator') {
+      return res.status(403).json({ error: 'Оператор не может редактировать план' });
+    }
+    const { workshop_id, building_floor_id, week_start, row_key, planned_manual } = req.body;
+    if (!workshop_id || !week_start || !row_key) {
+      return res.status(400).json({ error: 'Укажите workshop_id, week_start, row_key' });
+    }
+
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+
+    const floorId = workshop.floors_count === 4 && building_floor_id != null && building_floor_id !== ''
+      ? Number(building_floor_id)
+      : null;
+    const totalForWeek = Math.max(0, Math.round(parseFloat(planned_manual) || 0));
+
+    const wStart = String(week_start).slice(0, 10);
+    const wEndDate = new Date(wStart + 'T12:00:00');
+    wEndDate.setDate(wEndDate.getDate() + 6);
+    const wEnd = wEndDate.toISOString().slice(0, 10);
+
+    const workingDays = getWorkingDaysInRange(wStart, wEnd);
+    if (workingDays.length === 0) {
+      return res.status(400).json({ error: 'В выбранной неделе нет рабочих дней' });
+    }
+
+    const period = await requireActivePeriodForDate(db, wStart);
+
+    const base = Math.floor(totalForWeek / workingDays.length);
+    const rest = totalForWeek % workingDays.length;
+    const dailyPlans = workingDays.map((d, i) => ({
+      date: d,
+      planned_qty: base + (i < rest ? 1 : 0),
+    }));
+
+    const t = await db.sequelize.transaction();
+    try {
+      for (const { date, planned_qty } of dailyPlans) {
+        const [row] = await db.ProductionPlanDay.findOrCreate({
+          where: {
+            period_id: period.id,
+            order_id: Number(row_key),
+            workshop_id: Number(workshop_id),
+            floor_id: floorId,
+            date,
+          },
+          defaults: { planned_qty, actual_qty: 0 },
+          transaction: t,
+        });
+        if (row) await row.update({ planned_qty }, { transaction: t });
+      }
+      await syncWeeklyCacheFromDaily(db, Number(workshop_id), floorId, Number(row_key), workingDays, period.id, t);
+      await recalculateCarry(db, Number(workshop_id), floorId, period.id, t);
+      await t.commit();
+      res.json({ ok: true, message: 'План сохранён' });
+    } catch (err) {
+      await t.rollback();
+      throw err;
+    }
   } catch (err) {
     next(err);
   }
@@ -367,7 +879,8 @@ router.get('/cutting-summary', async (req, res, next) => {
 
 /**
  * POST /api/planning/calc-capacity
- * Расчёт плана по мощности: remaining, daily_capacity, working_days, total_capacity, percent, overload, days
+ * Автоплан: распределение remainder по дням с учётом existing_load и free_capacity.
+ * proposed_day = min(remainder_qty, free_capacity_day); если мощность не хватает — остаток, без фейковых чисел.
  */
 router.post('/calc-capacity', async (req, res, next) => {
   try {
@@ -377,10 +890,6 @@ router.post('/calc-capacity', async (req, res, next) => {
     }
     if (from > to) {
       return res.status(400).json({ error: 'Дата начала не может быть позже даты окончания' });
-    }
-    const capWeek = capacity_week != null && capacity_week !== '' ? parseInt(capacity_week, 10) : null;
-    if (capWeek != null && (capWeek < 1000 || capWeek > 5000)) {
-      return res.status(400).json({ error: 'Мощность в неделю должна быть от 1000 до 5000 ед' });
     }
 
     const workshop = await db.Workshop.findByPk(workshop_id);
@@ -406,118 +915,148 @@ router.post('/calc-capacity', async (req, res, next) => {
       effectiveFloorId = fid;
     }
 
-    // 1) total_quantity, actual_total, remaining
+    // Мощность: из параметра или из БД (weekly_capacity)
+    let capacityWeekNum = capacity_week != null && capacity_week !== '' ? parseInt(capacity_week, 10) : null;
+    if (capacityWeekNum == null || capacityWeekNum <= 0) {
+      const weekStart = getWeekStart(from);
+      const capRow = await db.WeeklyCapacity.findOne({
+        where: {
+          workshop_id: Number(workshop_id),
+          building_floor_id: effectiveFloorId,
+          week_start: weekStart,
+        },
+      });
+      capacityWeekNum = capRow ? parseFloat(capRow.capacity_week) || 0 : 0;
+    }
+    if (capacityWeekNum <= 0) {
+      return res.status(400).json({
+        error: 'Мощность не задана',
+        capacity_not_set: true,
+      });
+    }
+    if (capacityWeekNum < 1000 || capacityWeekNum > 5000) {
+      return res.status(400).json({ error: 'Мощность в неделю должна быть от 1000 до 5000 ед' });
+    }
+
+    const capacityDay = Math.round(capacityWeekNum / WORKING_DAYS_PER_WEEK);
+    const workingDaysList = getWorkingDaysInRange(from, to);
+    const workingDaysCount = workingDaysList.length;
+
+    // remainder_qty = total_order_qty - fact_done_qty
     const totalQuantity = order.total_quantity ?? order.quantity ?? 0;
     const actualRows = await db.sequelize.query(
       `SELECT COALESCE(SUM(actual_qty), 0)::int as actual_total
        FROM production_plan_day
        WHERE order_id = :orderId AND (floor_id = :floorId OR (:floorId IS NULL AND floor_id IS NULL))`,
       {
-        replacements: {
-          orderId: Number(order_id),
-          floorId: effectiveFloorId,
-        },
+        replacements: { orderId: Number(order_id), floorId: effectiveFloorId },
         type: db.sequelize.QueryTypes.SELECT,
       }
     );
     const planActualTotal = actualRows[0]?.actual_total ?? 0;
-
-    // План и факт по раскрою — из CuttingTask.actual_variants
     const cuttingTasks = await db.CuttingTask.findAll({
       where: { order_id: Number(order_id) },
       attributes: ['actual_variants'],
     });
-    let cuttingPlannedTotal = 0;
-    let cuttingActualTotal = 0;
+    let cutting_fact_qty = 0;
     for (const t of cuttingTasks) {
-      const variants = t.actual_variants || [];
-      for (const v of variants) {
-        cuttingPlannedTotal += parseInt(v.quantity_planned, 10) || 0;
-        cuttingActualTotal += parseInt(v.quantity_actual, 10) || 0;
+      for (const v of t.actual_variants || []) {
+        cutting_fact_qty += parseInt(v.quantity_actual, 10) || 0;
       }
     }
-    // Если нет плана из раскроя — используем общее кол-во заказа
-    if (cuttingPlannedTotal === 0) {
-      cuttingPlannedTotal = totalQuantity;
+    // После раскроя: планирование пошива ограничено фактом раскроя
+    if (cutting_fact_qty <= 0) {
+      return res.status(400).json({
+        error: 'Нет факта раскроя',
+        cutting_fact_not_set: true,
+      });
     }
+    const available_to_sew = cutting_fact_qty;
+    // Остаток по заказу; сверху ограничиваем тем, что можно пошить по факту раскроя
+    const remainder_qty = Math.max(0, totalQuantity - planActualTotal);
+    const remainder_qty_capped = Math.min(remainder_qty, Math.max(0, available_to_sew - planActualTotal));
 
-    const actualTotal = Math.max(planActualTotal, cuttingActualTotal);
-    // Для Предложенного плана: распределяем ФАКТ по раскрою (не план) по мощностям
-    const remaining = cuttingActualTotal > 0
-      ? cuttingActualTotal
-      : cuttingPlannedTotal > 0
-        ? cuttingPlannedTotal
-        : Math.max(0, totalQuantity - actualTotal);
+    // Период планирования — по первой дате диапазона
+    const period = await getOrCreatePeriodForMonth(
+      db,
+      parseInt(from.slice(0, 4), 10),
+      parseInt(from.slice(5, 7), 10)
+    ).then((r) => r.period);
 
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    const dates = [];
-    let d = new Date(fromDate);
-    while (d <= toDate) {
-      dates.push(d.toISOString().slice(0, 10));
-      d.setDate(d.getDate() + 1);
+    // existing_load_day(date) = SUM(planned_qty) по всем заказам этажа на дату в этом периоде
+    const planDaysAll = await db.ProductionPlanDay.findAll({
+      where: {
+        period_id: period.id,
+        workshop_id: Number(workshop_id),
+        floor_id: effectiveFloorId,
+        date: { [Op.in]: workingDaysList },
+      },
+      attributes: ['order_id', 'date', 'planned_qty'],
+    });
+    const existingLoadDay = {};
+    const ourPlanDay = {};
+    for (const dt of workingDaysList) {
+      existingLoadDay[dt] = 0;
+      ourPlanDay[dt] = 0;
     }
-    const workingDays = dates.length;
-
-    // 2) daily_capacity, total_capacity
-    // Если задана мощность в неделю (capacity_week): total = capacity_week * (дней / 7), daily = capacity_week / 7
-    let dailyCapacity = 200; // по умолчанию
-    let totalCapacity;
-    const capacityWeekNum = capacity_week != null && capacity_week !== '' ? parseInt(capacity_week, 10) : null;
-    if (capacityWeekNum && capacityWeekNum > 0) {
-      totalCapacity = Math.round(capacityWeekNum * (workingDays / 7));
-      dailyCapacity = Math.round(capacityWeekNum / 7);
-    } else {
-      if (effectiveFloorId) {
-        const capRows = await db.sequelize.query(
-          `SELECT COALESCE(SUM(s.capacity_per_day), 0)::int as daily_capacity
-           FROM technologists t
-           JOIN sewers s ON s.technologist_id = t.id
-           WHERE t.building_floor_id = :floorId
-           GROUP BY t.building_floor_id`,
-          {
-            replacements: { floorId: effectiveFloorId },
-            type: db.sequelize.QueryTypes.SELECT,
-          }
-        );
-        dailyCapacity = capRows[0]?.daily_capacity ?? 200;
-      }
-      totalCapacity = dailyCapacity * workingDays;
-    }
-
-    // 3) overload, percent
-    const percent = totalCapacity > 0 ? Math.round((remaining / totalCapacity) * 100) : 0;
-    const overload = remaining > totalCapacity;
-
-    // 4) days — равномерное распределение, сумма = ровно remaining (257+258+... = 1800)
-    let days = [];
-    if (!overload && workingDays > 0) {
-      if (remaining > 0) {
-        const base = Math.floor(remaining / workingDays);
-        const rest = remaining % workingDays;
-        days = dates.map((date, i) => {
-          const plannedQty = base + (i < rest ? 1 : 0);
-          return { date, planned_qty: plannedQty };
-        });
-      } else {
-        days = dates.map((date) => ({ date, planned_qty: 0 }));
+    for (const pd of planDaysAll) {
+      const q = pd.planned_qty || 0;
+      existingLoadDay[pd.date] = (existingLoadDay[pd.date] || 0) + q;
+      if (pd.order_id === Number(order_id)) {
+        ourPlanDay[pd.date] = q;
       }
     }
+
+    // free_capacity_day = max(0, capacity_day - (existing_load - our_plan))
+    // Распределяем не больше available_to_sew (факт раскроя)
+    const proposed = [];
+    let remainder = remainder_qty_capped;
+    let proposed_sum = 0;
+
+    for (const date of workingDaysList) {
+      const loadWithoutUs = (existingLoadDay[date] || 0) - (ourPlanDay[date] || 0);
+      const free_capacity_day = Math.max(0, capacityDay - loadWithoutUs);
+      const proposed_day = Math.min(remainder, Math.round(free_capacity_day));
+      remainder -= proposed_day;
+      proposed_sum += proposed_day;
+      proposed.push({ date, planned_qty: proposed_day });
+    }
+
+    // Диагностика в dev
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[planning calc-capacity]', {
+        capacity_week: capacityWeekNum,
+        working_days_count: WORKING_DAYS_PER_WEEK,
+        capacity_day: capacityDay,
+        existing_load_day_sample: workingDaysList.slice(0, 3).reduce((o, d) => {
+          o[d] = existingLoadDay[d]; return o;
+        }, {}),
+        free_capacity_day_sample: workingDaysList.slice(0, 3).reduce((o, d) => {
+          o[d] = Math.max(0, capacityDay - (existingLoadDay[d] || 0) + (ourPlanDay[d] || 0));
+          return o;
+        }, {}),
+        proposed_sum,
+        remainder_after: remainder,
+      });
+    }
+
+    const overload = remainder > 0;
+    const totalCapacity = capacityDay * workingDaysCount;
+    const percent = totalCapacity > 0 ? Math.round((proposed_sum / totalCapacity) * 100) : 0;
 
     res.json({
       total_quantity: totalQuantity,
-      actual_total: actualTotal,
-      cutting_planned_total: cuttingPlannedTotal,
-      cutting_actual_total: cuttingActualTotal,
-      plan_actual_total: planActualTotal,
-      remaining,
-      daily_capacity: dailyCapacity,
-      working_days: workingDays,
+      actual_total: planActualTotal,
+      available_to_sew: available_to_sew,
+      remaining: remainder_qty_capped,
+      daily_capacity: capacityDay,
+      working_days: workingDaysCount,
       total_capacity: totalCapacity,
-      capacity_week: capacityWeekNum || null,
+      capacity_week: capacityWeekNum,
       percent,
       overload,
-      days,
+      remainder_after: overload ? remainder : 0,
+      days: proposed,
     });
   } catch (err) {
     next(err);
@@ -578,10 +1117,13 @@ router.post('/apply-capacity', async (req, res, next) => {
       [null, null]
     );
 
+    const period = await requireActivePeriodForDate(db, dateRange[0]);
+
     const t = await db.sequelize.transaction();
     try {
       const existingRows = await db.ProductionPlanDay.findAll({
         where: {
+          period_id: period.id,
           order_id: Number(order_id),
           workshop_id: Number(workshop_id),
           floor_id: effectiveFloorId,
@@ -596,6 +1138,7 @@ router.post('/apply-capacity', async (req, res, next) => {
 
       await db.ProductionPlanDay.destroy({
         where: {
+          period_id: period.id,
           order_id: Number(order_id),
           workshop_id: Number(workshop_id),
           floor_id: effectiveFloorId,
@@ -604,12 +1147,15 @@ router.post('/apply-capacity', async (req, res, next) => {
         transaction: t,
       });
 
+      const affectedDates = [];
       for (const d of days) {
         const date = String(d.date || d).slice(0, 10);
+        affectedDates.push(date);
         const plannedQty = Math.max(0, parseInt(d.planned_qty, 10) || 0);
         const actualQty = actualByDate[date] ?? 0;
         await db.ProductionPlanDay.create(
           {
+            period_id: period.id,
             order_id: Number(order_id),
             workshop_id: Number(workshop_id),
             floor_id: effectiveFloorId,
@@ -620,6 +1166,8 @@ router.post('/apply-capacity', async (req, res, next) => {
           { transaction: t }
         );
       }
+      await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), affectedDates, period.id, t);
+      await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id, t);
 
       // Чтобы план отображался в «Информации о заказе», связываем заказ с этажом при применении
       if (effectiveFloorId != null && (order.building_floor_id == null || order.building_floor_id === '')) {
@@ -632,6 +1180,116 @@ router.post('/apply-capacity', async (req, res, next) => {
       await t.rollback();
       throw err;
     }
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/planning/apply-proposed — body: { floor_id, row_key, proposed: [{date, qty}] } */
+router.post('/apply-proposed', async (req, res, next) => {
+  try {
+    const { floor_id, row_key, proposed } = req.body;
+    if (!row_key || !Array.isArray(proposed) || proposed.length === 0) {
+      return res.status(400).json({ error: 'Укажите row_key и массив proposed' });
+    }
+    const order = await db.Order.findByPk(row_key);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    req.body = {
+      order_id: row_key,
+      workshop_id: order.workshop_id,
+      floor_id: floor_id ?? null,
+      days: proposed.map((p) => ({ date: p.date, planned_qty: p.qty ?? p.planned_qty ?? 0 })),
+    };
+    next();
+  } catch (err) {
+    next(err);
+  }
+}, async (req, res, next) => {
+  const { order_id, workshop_id, floor_id, days } = req.body;
+  try {
+    if (req.user?.role === 'operator') return res.status(403).json({ error: 'Оператор не может применять план' });
+    if (!order_id || !workshop_id || !Array.isArray(days) || days.length === 0) {
+      return res.status(400).json({ error: 'Укажите order_id, workshop_id и массив days' });
+    }
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+    let effectiveFloorId = workshop.floors_count === 4 && floor_id != null && floor_id !== 'all' ? Number(floor_id) : null;
+    if (workshop.floors_count === 4 && (effectiveFloorId == null || effectiveFloorId < 1 || effectiveFloorId > 4)) {
+      return res.status(400).json({ error: 'Для цеха «Наш цех» укажите floor_id (1–4)' });
+    }
+    const order = await db.Order.findByPk(order_id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (Number(order.workshop_id) !== Number(workshop_id)) return res.status(400).json({ error: 'Заказ не принадлежит цеху' });
+    const dateRange = days.reduce((a, d) => {
+      const dt = String(d.date || d).slice(0, 10);
+      return [(a[0] && dt < a[0] ? dt : a[0]) || dt, (a[1] && dt > a[1] ? dt : a[1]) || dt];
+    }, [null, null]);
+    const period = await requireActivePeriodForDate(db, dateRange[0]);
+    const t = await db.sequelize.transaction();
+    try {
+      const existingRows = await db.ProductionPlanDay.findAll({
+        where: { period_id: period.id, order_id, workshop_id, floor_id: effectiveFloorId, date: { [Op.between]: [dateRange[0], dateRange[1]] } },
+        transaction: t,
+      });
+      const actualByDate = existingRows.reduce((a, r) => { a[r.date] = r.actual_qty || 0; return a; }, {});
+      await db.ProductionPlanDay.destroy({
+        where: { period_id: period.id, order_id, workshop_id, floor_id: effectiveFloorId, date: { [Op.between]: [dateRange[0], dateRange[1]] } },
+        transaction: t,
+      });
+      const affectedDates = [];
+      for (const d of days) {
+        const date = String(d.date || d).slice(0, 10);
+        affectedDates.push(date);
+        await db.ProductionPlanDay.create({
+          period_id: period.id,
+          order_id, workshop_id, floor_id: effectiveFloorId, date,
+          planned_qty: Math.max(0, parseInt(d.planned_qty, 10) || 0),
+          actual_qty: actualByDate[date] ?? 0,
+        }, { transaction: t });
+      }
+      await syncWeeklyCacheFromDaily(db, workshop_id, effectiveFloorId, order_id, affectedDates, period.id, t);
+      await recalculateCarry(db, workshop_id, effectiveFloorId, period.id, t);
+      if (effectiveFloorId != null && !order.building_floor_id) {
+        await order.update({ building_floor_id: effectiveFloorId }, { transaction: t });
+      }
+      await t.commit();
+      res.json({ ok: true, message: 'План применён' });
+    } catch (e) {
+      await t.rollback();
+      throw e;
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/planning/recalculate-carry?period_id=&floor_id=&workshop_id= — пересчитать carry по всем строкам периода */
+router.post('/recalculate-carry', async (req, res, next) => {
+  try {
+    const { period_id, floor_id, workshop_id } = req.query;
+    if (!period_id || !workshop_id) {
+      return res.status(400).json({ error: 'Укажите workshop_id и period_id' });
+    }
+    const period = await db.PlanningPeriod.findByPk(period_id);
+    if (!period) return res.status(404).json({ error: 'Период не найден' });
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+    const floorId = workshop.floors_count === 4 && floor_id ? Number(floor_id) : null;
+    await recalculateCarry(db, Number(workshop_id), floorId, Number(period_id));
+    res.json({ ok: true, message: 'Перенос пересчитан' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/planning/integrity-check — dev: проверка weekly vs daily */
+router.get('/integrity-check', async (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Недоступно в production' });
+    }
+    await checkWeeklyIntegrity(db);
+    res.json({ ok: true, message: 'Проверка выполнена (см. консоль)' });
   } catch (err) {
     next(err);
   }

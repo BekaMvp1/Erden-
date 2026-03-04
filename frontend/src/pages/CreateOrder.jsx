@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 import { NeonButton, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
@@ -246,7 +247,10 @@ export default function CreateOrder() {
 
   return (
     <div>
-      <h1 className="text-xl sm:text-2xl font-bold text-neon-text mb-4 sm:mb-6">Создать заказ</h1>
+      <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-4 sm:mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-neon-text">Создать заказ</h1>
+        <PrintButton />
+      </div>
       <form
         onSubmit={handleSubmit}
         className="max-w-4xl mx-auto card-neon rounded-card p-4 sm:p-6 space-y-4 transition-block"

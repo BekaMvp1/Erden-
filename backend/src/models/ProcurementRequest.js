@@ -1,7 +1,7 @@
 /**
  * Модель: Заявка на закуп (один заказ = один запрос)
+ * status: draft | sent | received
  */
-
 module.exports = (sequelize, DataTypes) => {
   const ProcurementRequest = sequelize.define('ProcurementRequest', {
     id: {
@@ -15,9 +15,9 @@ module.exports = (sequelize, DataTypes) => {
       unique: true,
     },
     status: {
-      type: DataTypes.ENUM('Ожидает закуп', 'Закуплено', 'Частично', 'Отменено'),
+      type: DataTypes.STRING(20),
       allowNull: false,
-      defaultValue: 'Ожидает закуп',
+      defaultValue: 'draft',
     },
     due_date: {
       type: DataTypes.DATEONLY,
@@ -28,8 +28,8 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 0,
     },
-    created_by: {
-      type: DataTypes.INTEGER,
+    completed_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
   }, {

@@ -27,6 +27,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: '',
     },
+    model_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Ссылка на справочник моделей (размерная сетка)',
+    },
     article: {
       type: DataTypes.STRING(80),
       allowNull: true,

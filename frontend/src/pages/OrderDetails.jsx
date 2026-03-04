@@ -5,19 +5,21 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { usePrintHeader } from '../context/PrintContext';
 import { CompleteByFactModal } from './Cutting';
-import ProcurementModal from '../components/procurement/ProcurementModal';
+import ProcurementPlanModal from '../components/procurement/ProcurementPlanModal';
 
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
 const DEFAULT_SIZES = [...LETTER_SIZES, ...NUMERIC_SIZES];
 
 const STATUS_COLORS = {
-  Принят: 'bg-yellow-500/20 text-yellow-400',
+  Принят: 'bg-gray-500/20 text-gray-900 dark:text-gray-100',
   'В работе': 'bg-lime-500/20 text-lime-400',
   Готов: 'bg-green-500/20 text-green-400',
   Просрочен: 'bg-red-500/20 text-red-400',
@@ -45,6 +47,13 @@ function canEditOrder(user) {
 /** Проверка: может ли пользователь удалить заказ */
 function canDeleteOrder(user) {
   return user?.role === 'admin' || user?.role === 'manager';
+}
+
+/** Форматирование этажа для отображения */
+function formatFloor(floor) {
+  if (floor == null) return '—';
+  const labels = { 1: '1 (Финиш)', 2: '2 (Пошив)', 3: '3 (Пошив)', 4: '4 (Пошив)' };
+  return labels[floor] || `${floor} этаж`;
 }
 
 export default function OrderDetails() {
@@ -84,6 +93,7 @@ export default function OrderDetails() {
   const [planEditModal, setPlanEditModal] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
+  const [procurement, setProcurement] = useState(null);
   const editColorInputRef = useRef(null);
   const editColorDropdownRef = useRef(null);
 
@@ -110,6 +120,14 @@ export default function OrderDetails() {
   useEffect(() => {
     loadOrder();
   }, [id]);
+
+  useEffect(() => {
+    if (!order?.id) return;
+    api.orders
+      .getProcurement(order.id)
+      .then((res) => setProcurement(res))
+      .catch(() => setProcurement(null));
+  }, [order?.id]);
 
   useEffect(() => {
     if (!order?.workshop_id) {
@@ -492,6 +510,7 @@ export default function OrderDetails() {
     tzCode ||
     modelName ||
     '';
+  usePrintHeader(displayOrderName ? `Заказ: ${displayOrderName}` : 'Детали заказа', '');
 
   const handleCuttingStatusChange = async (task, newStatus) => {
     try {
@@ -502,11 +521,12 @@ export default function OrderDetails() {
     }
   };
 
-  const handleCuttingCompleteByFact = async (task, actualVariants) => {
+  const handleCuttingCompleteByFact = async (task, actualVariants, endDate) => {
     try {
       await api.cutting.updateTask(task.id, {
         status: 'Готово',
         actual_variants: actualVariants,
+        end_date: endDate || undefined,
       });
       setCuttingCompleteModalTask(null);
       loadOrder();
@@ -515,9 +535,12 @@ export default function OrderDetails() {
     }
   };
 
-  const handleCuttingEditActualVariants = async (task, actualVariants) => {
+  const handleCuttingEditActualVariants = async (task, actualVariants, endDate) => {
     try {
-      await api.cutting.updateTask(task.id, { actual_variants: actualVariants });
+      await api.cutting.updateTask(task.id, {
+        actual_variants: actualVariants,
+        end_date: endDate || undefined,
+      });
       setCuttingCompleteModalTask(null);
       loadOrder();
     } catch (err) {
@@ -818,6 +841,74 @@ export default function OrderDetails() {
           </div>
         </div>
 
+      {/* Блок закупа */}
+      {procurement && (
+        <div className="card-neon rounded-card overflow-hidden mt-4 sm:mt-6 transition-block">
+          <div className="p-4 sm:p-6 border-b border-white/25 dark:border-white/25 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base sm:text-lg font-medium text-[#ECECEC] dark:text-dark-text">Закуп</h2>
+            <button
+              type="button"
+              onClick={() => setShowProcurementModal(true)}
+              className="px-3 py-1.5 rounded-lg bg-accent-1/30 text-[#ECECEC] text-sm"
+            >
+              Открыть закуп
+            </button>
+          </div>
+          <div className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-[#ECECEC]/70 dark:text-dark-text/70">Статус</span>
+                <div className="font-medium mt-1">
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded text-xs ${
+                      procurement.procurement?.status === 'received'
+                        ? 'bg-green-500/20 text-green-400'
+                        : procurement.procurement?.status === 'sent'
+                          ? 'bg-lime-500/20 text-lime-400'
+                          : 'bg-gray-500/20 text-gray-400'
+                    }`}
+                  >
+                    {procurement.procurement?.status === 'received'
+                      ? 'Закуплено'
+                      : procurement.procurement?.status === 'sent'
+                        ? 'Отправлено'
+                        : '—'}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/70 dark:text-dark-text/70">Дедлайн</span>
+                <div className="font-medium text-[#ECECEC] dark:text-dark-text mt-1">
+                  {procurement.procurement?.due_date || '—'}
+                </div>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/70 dark:text-dark-text/70">Сумма</span>
+                <div className="font-medium text-primary-400 mt-1">
+                  {Number(procurement.procurement?.total_sum || 0).toFixed(2)} ₽
+                </div>
+              </div>
+              <div>
+                <span className="text-[#ECECEC]/70 dark:text-dark-text/70">Обновлено</span>
+                <div className="font-medium text-[#ECECEC] dark:text-dark-text mt-1">
+                  {procurement.procurement?.updated_at
+                    ? procurement.procurement.updated_at.slice(0, 10).split('-').reverse().join('.')
+                    : '—'}
+                </div>
+              </div>
+              {procurement.procurement?.completed_at && (
+                <div className="sm:col-span-2">
+                  <span className="text-[#ECECEC]/70 dark:text-dark-text/70">Выполнено</span>
+                  <div className="font-medium text-green-400 mt-1">
+                    ✅ {new Date(procurement.procurement.completed_at).toLocaleString('ru-RU')}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Блок задач раскроя — до операций заказа */}
       {cuttingTasks.length > 0 && (
         <div className="card-neon rounded-card overflow-hidden mt-4 sm:mt-6 transition-block">
@@ -834,6 +925,9 @@ export default function OrderDetails() {
               <thead>
                 <tr className="bg-accent-3/80 dark:bg-dark-900 border-b border-white/25 dark:border-white/25">
                   <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Заказ</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Этаж</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дата начала</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дата окончания</th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Операция</th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Статус</th>
                   <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Ответственный</th>
@@ -861,7 +955,8 @@ export default function OrderDetails() {
                         color: v.color,
                         size: v.Size?.name || '',
                         quantity_planned: v.quantity || 0,
-                        quantity_actual: actualMap[key] ?? v.quantity ?? 0,
+                        // По факту — только после «Завершить по факту», иначе 0
+                        quantity_actual: task.status === 'Готово' ? (actualMap[key] ?? 0) : 0,
                       };
                       seen[key] = row;
                       rows.push(row);
@@ -893,6 +988,9 @@ export default function OrderDetails() {
                             </div>
                           </div>
                         </td>
+                        <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{formatFloor(task.floor)}</td>
+                        <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{task.start_date || '—'}</td>
+                        <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{task.end_date || '—'}</td>
                         <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{task.operation || 'раскрой'}</td>
                         <td className="px-4 py-3 align-top">
                           {canEditCutting ? (
@@ -922,8 +1020,12 @@ export default function OrderDetails() {
                             ) : !isExpanded ? (
                               <div className="text-sm text-[#ECECEC]/90 dark:text-dark-text/90">
                                 <span>План: {rows.reduce((s, r) => s + (r.quantity_planned || 0), 0)}</span>
-                                <span className="mx-2">|</span>
-                                <span>Факт: {rows.reduce((s, r) => s + (r.quantity_actual || 0), 0)}</span>
+                                {task.status === 'Готово' && (
+                                  <>
+                                    <span className="mx-2">|</span>
+                                    <span>Факт: {rows.reduce((s, r) => s + (r.quantity_actual || 0), 0)}</span>
+                                  </>
+                                )}
                               </div>
                             ) : !canEditCutting && task.status === 'Готово' ? (
                               <span className="text-[#ECECEC]/80">—</span>
@@ -942,7 +1044,7 @@ export default function OrderDetails() {
                         )}
                       </tr>
                       <tr className="border-b border-white/15 dark:border-white/15 bg-accent-2/20 dark:bg-dark-900/50">
-                        <td colSpan={canEditCutting ? 6 : 5} className="px-4 py-0 overflow-hidden">
+                        <td colSpan={canEditCutting ? 9 : 8} className="px-4 py-0 overflow-hidden">
                           <div
                             className="grid transition-[grid-template-rows] duration-300 ease-out"
                             style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
@@ -1081,8 +1183,8 @@ export default function OrderDetails() {
       )}
 
       {/* Модалка редактирования плана по дню */}
-      {planEditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPlanEditModal(null)}>
+      {planEditModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden" onClick={() => setPlanEditModal(null)}>
           <div
             className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25 animate-page-enter"
             onClick={(e) => e.stopPropagation()}
@@ -1135,7 +1237,8 @@ export default function OrderDetails() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {showOperationsSection && (
@@ -1272,8 +1375,8 @@ export default function OrderDetails() {
       )}
       </div>
 
-      {showOperationsSection && showCompleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      {showOperationsSection && showCompleteConfirm && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden">
           <div className="bg-accent-3 dark:bg-dark-900 rounded-xl p-4 sm:p-6 max-w-md w-full border border-white/25 dark:border-white/25">
             <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
               Подтверждение
@@ -1298,12 +1401,13 @@ export default function OrderDetails() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showEditModal && (
-        <div className="fixed inset-0 bg-slate-900/75 flex items-start justify-center z-50 overflow-y-auto p-4 sm:pt-16 sm:pb-8">
-          <div className="bg-[#2a2d35] rounded-xl p-4 sm:p-6 max-w-4xl w-full min-h-[90vh] sm:min-h-0 border border-white/20 dark:border-white/20 shadow-2xl">
+      {showEditModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/75 flex items-center justify-center z-50 p-4 overflow-hidden">
+          <div className="bg-[#2a2d35] rounded-xl p-4 sm:p-6 max-w-4xl w-full max-h-[90vh] overflow-auto border border-white/20 dark:border-white/20 shadow-2xl">
             <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
               Редактировать заказ
             </h2>
@@ -1596,12 +1700,13 @@ export default function OrderDetails() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {viewingPhoto && (
+      {viewingPhoto && createPortal(
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-hidden"
           onClick={() => setViewingPhoto(null)}
         >
           <img
@@ -1610,24 +1715,25 @@ export default function OrderDetails() {
             className="max-w-full max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}
           />
-        </div>
+        </div>,
+        document.body
       )}
 
       {cuttingCompleteModalTask && (
         <CompleteByFactModal
           task={{ ...cuttingCompleteModalTask, Order: order }}
           onClose={() => setCuttingCompleteModalTask(null)}
-          onSave={(actualVariants) =>
+          onSave={(actualVariants, endDate) =>
             cuttingCompleteModalTask.status === 'Готово'
-              ? handleCuttingEditActualVariants(cuttingCompleteModalTask, actualVariants)
-              : handleCuttingCompleteByFact(cuttingCompleteModalTask, actualVariants)
+              ? handleCuttingEditActualVariants(cuttingCompleteModalTask, actualVariants, endDate)
+              : handleCuttingCompleteByFact(cuttingCompleteModalTask, actualVariants, endDate)
           }
           isEditMode={cuttingCompleteModalTask.status === 'Готово'}
         />
       )}
 
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      {showDeleteConfirm && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden">
           <div className="bg-accent-3 dark:bg-dark-900 rounded-xl p-4 sm:p-6 max-w-md w-full border border-white/25 dark:border-white/25">
             <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
               Удалить заказ?
@@ -1652,15 +1758,18 @@ export default function OrderDetails() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      <ProcurementModal
+      <ProcurementPlanModal
         open={showProcurementModal}
         orderId={order.id}
         onClose={() => setShowProcurementModal(false)}
+        canEdit={['admin', 'manager', 'technologist'].includes(user?.role)}
         onSaved={() => {
           loadOrder();
+          api.orders.getProcurement(order.id).then(setProcurement).catch(() => {});
           setSuccessMsg('Закуп обновлён');
           setTimeout(() => setSuccessMsg(''), 2000);
         }}

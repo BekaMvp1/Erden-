@@ -41,18 +41,43 @@ router.get('/tasks', async (req, res, next) => {
   }
 });
 
+const FLOORS = [1, 2, 3, 4];
+
+/**
+ * Есть ли пересекающаяся активная задача на том же этаже
+ * Пересечение: (start_date <= endDate) AND (end_date >= startDate)
+ */
+async function hasOverlappingFloorTask(db, floor, excludeTaskId, startDate, endDate) {
+  if (!startDate || !endDate) return false;
+  const replacements = { floor: Number(floor), startDate, endDate };
+  const exclude = excludeTaskId ? 'AND id != :excludeId' : '';
+  if (excludeTaskId) replacements.excludeId = parseInt(excludeTaskId, 10);
+  const [rows] = await db.sequelize.query(
+    `SELECT id FROM cutting_tasks WHERE floor = :floor AND status != 'Готово'
+     AND start_date IS NOT NULL AND end_date IS NOT NULL
+     AND start_date <= :endDate AND end_date >= :startDate ${exclude} LIMIT 1`,
+    { replacements }
+  );
+  return rows.length > 0;
+}
+
 /**
  * POST /api/cutting/tasks
  * Добавить задачу на раскрой
- * body: { order_id, cutting_type, operation?, status?, responsible? }
+ * body: { order_id, cutting_type, floor, operation?, status?, responsible?, start_date?, end_date? }
  */
 router.post('/tasks', async (req, res, next) => {
   try {
-    const { order_id, cutting_type, operation, status, responsible } = req.body;
+    const { order_id, cutting_type, floor, operation, status, responsible, start_date, end_date } = req.body;
 
     if (!order_id) return res.status(400).json({ error: 'Укажите order_id' });
     if (!cutting_type || String(cutting_type).trim() === '') {
       return res.status(400).json({ error: 'Укажите тип раскроя' });
+    }
+
+    const floorNum = floor != null ? parseInt(floor, 10) : null;
+    if (floorNum == null || isNaN(floorNum) || !FLOORS.includes(floorNum)) {
+      return res.status(400).json({ error: 'Укажите этаж (1–4)' });
     }
 
     const order = await db.Order.findByPk(order_id);
@@ -66,12 +91,22 @@ router.post('/tasks', async (req, res, next) => {
       }
     }
 
+    if (start_date && end_date) {
+      const overlap = await hasOverlappingFloorTask(db, floorNum, null, start_date, end_date);
+      if (overlap) {
+        return res.status(400).json({ error: 'На этом этаже уже есть активная задача с пересекающимися датами' });
+      }
+    }
+
     const task = await db.CuttingTask.create({
       order_id,
       cutting_type: String(cutting_type).trim(),
+      floor: floorNum,
       operation: operation ? String(operation).trim() : null,
       status: status || 'Ожидает',
       responsible: responsible ? String(responsible).trim() : null,
+      start_date: start_date || null,
+      end_date: end_date || null,
     });
 
     await logAudit(req.user.id, 'CREATE', 'cutting_task', task.id);
@@ -91,7 +126,7 @@ router.post('/tasks', async (req, res, next) => {
 router.put('/tasks/:id', async (req, res, next) => {
   try {
     const taskId = req.params.id;
-    const { operation, status, responsible, actual_variants } = req.body;
+    const { operation, status, responsible, actual_variants, floor, start_date, end_date } = req.body;
 
     const task = await db.CuttingTask.findByPk(taskId, {
       include: [{ model: db.Order, as: 'Order' }],
@@ -110,6 +145,31 @@ router.put('/tasks/:id', async (req, res, next) => {
     if (status !== undefined) updates.status = String(status).trim() || 'Ожидает';
     if (responsible !== undefined) updates.responsible = responsible ? String(responsible).trim() : null;
     if (actual_variants !== undefined) updates.actual_variants = Array.isArray(actual_variants) ? actual_variants : null;
+
+    // Этаж можно менять только если задача не завершена
+    if (floor !== undefined) {
+      if (task.status === 'Готово') {
+        return res.status(400).json({ error: 'Нельзя изменить этаж у завершённой задачи' });
+      }
+      const floorNum = parseInt(floor, 10);
+      if (isNaN(floorNum) || !FLOORS.includes(floorNum)) {
+        return res.status(400).json({ error: 'Этаж должен быть от 1 до 4' });
+      }
+      updates.floor = floorNum;
+    }
+    if (start_date !== undefined) updates.start_date = start_date || null;
+    if (end_date !== undefined) updates.end_date = end_date || null;
+
+    // При смене этажа или дат — проверка пересечений (если задача не завершена и есть даты)
+    const newFloor = updates.floor ?? task.floor;
+    const newStart = updates.start_date ?? task.start_date;
+    const newEnd = updates.end_date ?? task.end_date;
+    if (task.status !== 'Готово' && newStart && newEnd) {
+      const overlap = await hasOverlappingFloorTask(db, newFloor, taskId, newStart, newEnd);
+      if (overlap) {
+        return res.status(400).json({ error: 'На этом этаже уже есть активная задача с пересекающимися датами' });
+      }
+    }
 
     await task.update(updates);
     await logAudit(req.user.id, 'UPDATE', 'cutting_task', taskId);

@@ -7,6 +7,7 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 import { Chip, NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 export default function References() {
   const { user } = useAuth();
@@ -308,9 +309,11 @@ export default function References() {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+      <div className="no-print flex items-center justify-between gap-4 mb-6 flex-wrap">
         <h1 className="text-2xl font-bold text-neon-text">Справочники</h1>
-        <NeonButton
+        <div className="flex items-center gap-2">
+          <PrintButton />
+          <NeonButton
           type="button"
           onClick={() => load()}
           disabled={loading}
@@ -322,6 +325,7 @@ export default function References() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         </NeonButton>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6 flex-wrap">

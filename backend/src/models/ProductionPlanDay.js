@@ -12,6 +12,13 @@ module.exports = (sequelize, DataTypes) => {
         primaryKey: true,
         autoIncrement: true,
       },
+      period_id: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'planning_periods', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'RESTRICT',
+      },
       order_id: {
         type: DataTypes.INTEGER,
         allowNull: false,

@@ -60,7 +60,24 @@ const db = {
   OrderVariant: require('./OrderVariant')(sequelize, Sequelize.DataTypes),
   Workshop: require('./Workshop')(sequelize, Sequelize.DataTypes),
   ProductionPlanDay: require('./ProductionPlanDay')(sequelize, Sequelize.DataTypes),
+  WeeklyPlan: require('./WeeklyPlan')(sequelize, Sequelize.DataTypes),
+  WeeklyCapacity: require('./WeeklyCapacity')(sequelize, Sequelize.DataTypes),
+  WeeklyCarry: require('./WeeklyCarry')(sequelize, Sequelize.DataTypes),
+  PlanningPeriod: require('./PlanningPeriod')(sequelize, Sequelize.DataTypes),
   SyncQueue: require('./SyncQueue')(sequelize, Sequelize.DataTypes),
+  ProductModel: require('./ProductModel')(sequelize, Sequelize.DataTypes),
+  ModelSize: require('./ModelSize')(sequelize, Sequelize.DataTypes),
+  SewingRecord: require('./SewingRecord')(sequelize, Sequelize.DataTypes),
+  QcRecord: require('./QcRecord')(sequelize, Sequelize.DataTypes),
+  WarehouseStock: require('./WarehouseStock')(sequelize, Sequelize.DataTypes),
+  Shipment: require('./Shipment')(sequelize, Sequelize.DataTypes),
+  OrderSizeMatrix: require('./OrderSizeMatrix')(sequelize, Sequelize.DataTypes),
+  SewingPlan: require('./SewingPlan')(sequelize, Sequelize.DataTypes),
+  SewingBatch: require('./SewingBatch')(sequelize, Sequelize.DataTypes),
+  SewingBatchItem: require('./SewingBatchItem')(sequelize, Sequelize.DataTypes),
+  QcBatch: require('./QcBatch')(sequelize, Sequelize.DataTypes),
+  QcBatchItem: require('./QcBatchItem')(sequelize, Sequelize.DataTypes),
+  ShipmentItem: require('./ShipmentItem')(sequelize, Sequelize.DataTypes),
 };
 
 // Связи
@@ -136,8 +153,8 @@ db.User.hasMany(db.OrderFloorDistribution, { foreignKey: 'distributed_by' });
 db.OrderFloorDistribution.belongsTo(db.User, { foreignKey: 'distributed_by' });
 
 // Закуп
-db.Order.hasOne(db.ProcurementRequest, { foreignKey: 'order_id' });
-db.ProcurementRequest.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.Order.hasOne(db.ProcurementRequest, { foreignKey: 'order_id', as: 'ProcurementRequest' });
+db.ProcurementRequest.belongsTo(db.Order, { foreignKey: 'order_id', as: 'Order' });
 db.ProcurementRequest.hasMany(db.ProcurementItem, { foreignKey: 'procurement_request_id' });
 db.ProcurementItem.belongsTo(db.ProcurementRequest, { foreignKey: 'procurement_request_id' });
 
@@ -164,5 +181,104 @@ db.Workshop.hasMany(db.ProductionPlanDay, { foreignKey: 'workshop_id' });
 db.ProductionPlanDay.belongsTo(db.Workshop, { foreignKey: 'workshop_id' });
 db.BuildingFloor.hasMany(db.ProductionPlanDay, { foreignKey: 'floor_id' });
 db.ProductionPlanDay.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+
+db.Workshop.hasMany(db.WeeklyPlan, { foreignKey: 'workshop_id' });
+db.WeeklyPlan.belongsTo(db.Workshop, { foreignKey: 'workshop_id' });
+db.BuildingFloor.hasMany(db.WeeklyPlan, { foreignKey: 'building_floor_id' });
+db.WeeklyPlan.belongsTo(db.BuildingFloor, { foreignKey: 'building_floor_id' });
+
+db.Workshop.hasMany(db.WeeklyCapacity, { foreignKey: 'workshop_id' });
+db.WeeklyCapacity.belongsTo(db.Workshop, { foreignKey: 'workshop_id' });
+db.BuildingFloor.hasMany(db.WeeklyCapacity, { foreignKey: 'building_floor_id' });
+db.WeeklyCapacity.belongsTo(db.BuildingFloor, { foreignKey: 'building_floor_id' });
+
+db.Workshop.hasMany(db.WeeklyCarry, { foreignKey: 'workshop_id' });
+db.WeeklyCarry.belongsTo(db.Workshop, { foreignKey: 'workshop_id' });
+db.BuildingFloor.hasMany(db.WeeklyCarry, { foreignKey: 'building_floor_id' });
+db.WeeklyCarry.belongsTo(db.BuildingFloor, { foreignKey: 'building_floor_id' });
+
+// Периоды планирования (месяцы)
+db.PlanningPeriod.hasMany(db.ProductionPlanDay, { foreignKey: 'period_id' });
+db.ProductionPlanDay.belongsTo(db.PlanningPeriod, { foreignKey: 'period_id' });
+db.PlanningPeriod.hasMany(db.WeeklyPlan, { foreignKey: 'period_id' });
+db.WeeklyPlan.belongsTo(db.PlanningPeriod, { foreignKey: 'period_id' });
+db.PlanningPeriod.hasMany(db.WeeklyCarry, { foreignKey: 'period_id' });
+db.WeeklyCarry.belongsTo(db.PlanningPeriod, { foreignKey: 'period_id' });
+
+// Складской учёт по размерам и партиям (модель → пошив → ОТК → склад → отгрузка)
+db.ProductModel.hasMany(db.ModelSize, { foreignKey: 'model_id' });
+db.ModelSize.belongsTo(db.ProductModel, { foreignKey: 'model_id' });
+db.Size.hasMany(db.ModelSize, { foreignKey: 'size_id' });
+db.ModelSize.belongsTo(db.Size, { foreignKey: 'size_id' });
+
+db.Order.belongsTo(db.ProductModel, { foreignKey: 'model_id' });
+db.ProductModel.hasMany(db.Order, { foreignKey: 'model_id' });
+
+db.Order.hasMany(db.SewingRecord, { foreignKey: 'order_id' });
+db.SewingRecord.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.BuildingFloor.hasMany(db.SewingRecord, { foreignKey: 'floor_id' });
+db.SewingRecord.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+db.ModelSize.hasMany(db.SewingRecord, { foreignKey: 'model_size_id' });
+db.SewingRecord.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.Order.hasMany(db.QcRecord, { foreignKey: 'order_id' });
+db.QcRecord.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.ModelSize.hasMany(db.QcRecord, { foreignKey: 'model_size_id' });
+db.QcRecord.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.Order.hasMany(db.WarehouseStock, { foreignKey: 'order_id' });
+db.WarehouseStock.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.ModelSize.hasMany(db.WarehouseStock, { foreignKey: 'model_size_id' });
+db.WarehouseStock.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.Order.hasMany(db.Shipment, { foreignKey: 'order_id' });
+db.Shipment.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.ModelSize.hasMany(db.Shipment, { foreignKey: 'model_size_id' });
+db.Shipment.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+// План пошива по размерной матрице (план и факт по этажам и размерам)
+db.Order.hasMany(db.OrderSizeMatrix, { foreignKey: 'order_id' });
+db.OrderSizeMatrix.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.ModelSize.hasMany(db.OrderSizeMatrix, { foreignKey: 'model_size_id' });
+db.OrderSizeMatrix.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.Order.hasMany(db.SewingPlan, { foreignKey: 'order_id' });
+db.SewingPlan.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.BuildingFloor.hasMany(db.SewingPlan, { foreignKey: 'floor_id' });
+db.SewingPlan.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+db.ModelSize.hasMany(db.SewingPlan, { foreignKey: 'model_size_id' });
+db.SewingPlan.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+// Партии пошива и ОТК по партиям
+db.Order.hasMany(db.SewingBatch, { foreignKey: 'order_id' });
+db.SewingBatch.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.ProductModel.hasMany(db.SewingBatch, { foreignKey: 'model_id' });
+db.SewingBatch.belongsTo(db.ProductModel, { foreignKey: 'model_id' });
+db.BuildingFloor.hasMany(db.SewingBatch, { foreignKey: 'floor_id' });
+db.SewingBatch.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+db.SewingBatch.hasMany(db.SewingPlan, { foreignKey: 'batch_id' });
+db.SewingPlan.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+
+db.SewingBatch.hasMany(db.SewingBatchItem, { foreignKey: 'batch_id' });
+db.SewingBatchItem.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+db.ModelSize.hasMany(db.SewingBatchItem, { foreignKey: 'model_size_id' });
+db.SewingBatchItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.SewingBatch.hasOne(db.QcBatch, { foreignKey: 'batch_id' });
+db.QcBatch.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+db.QcBatch.hasMany(db.QcBatchItem, { foreignKey: 'qc_batch_id' });
+db.QcBatchItem.belongsTo(db.QcBatch, { foreignKey: 'qc_batch_id' });
+db.ModelSize.hasMany(db.QcBatchItem, { foreignKey: 'model_size_id' });
+db.QcBatchItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+
+db.SewingBatch.hasMany(db.WarehouseStock, { foreignKey: 'batch_id' });
+db.WarehouseStock.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+
+db.SewingBatch.hasMany(db.Shipment, { foreignKey: 'batch_id' });
+db.Shipment.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+db.Shipment.hasMany(db.ShipmentItem, { foreignKey: 'shipment_id' });
+db.ShipmentItem.belongsTo(db.Shipment, { foreignKey: 'shipment_id' });
+db.ModelSize.hasMany(db.ShipmentItem, { foreignKey: 'model_size_id' });
+db.ShipmentItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
 
 module.exports = db;

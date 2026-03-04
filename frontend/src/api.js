@@ -84,11 +84,13 @@ export const api = {
       request(`/api/orders/${id}/photos/${index}`, { method: 'DELETE' }),
     getProcurement: (id) =>
       request(`/api/orders/${id}/procurement`),
-    updateProcurement: (id, data) =>
-      request(`/api/orders/${id}/procurement`, {
+    saveProcurementPlan: (id, data) =>
+      request(`/api/orders/${id}/procurement/plan`, {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
+    deleteProcurement: (id) =>
+      request(`/api/orders/${id}/procurement`, { method: 'DELETE' }),
   },
   planning: {
     updateOperation: (id, data) =>
@@ -134,6 +136,25 @@ export const api = {
     flowApplyAuto: (data) =>
       request('/api/planning/flow/apply-auto', {
         method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    // Периоды планирования (месяцы)
+    periods: () => request('/api/planning/periods'),
+    closePeriod: (periodId) =>
+      request(`/api/planning/periods/close?period_id=${periodId}`, { method: 'POST' }),
+    // Недельное планирование (params: period_id или month, workshop_id, floor_id)
+    weekly: (params) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/planning/weekly?${q}`);
+    },
+    weeklyManual: (data) =>
+      request('/api/planning/weekly/manual', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    saveCapacity: (data) =>
+      request('/api/planning/capacity', {
+        method: 'PUT',
         body: JSON.stringify(data),
       }),
   },
@@ -224,6 +245,13 @@ export const api = {
       const q = new URLSearchParams(params).toString();
       return request(`/api/procurement${q ? `?${q}` : ''}`);
     },
+    getById: (id) =>
+      request(`/api/procurement/${id}`),
+    complete: (id, items) =>
+      request(`/api/procurement/${id}/complete`, {
+        method: 'PUT',
+        body: JSON.stringify({ items: items || [] }),
+      }),
     addItem: (requestId, data) =>
       request(`/api/procurement/${requestId}/items`, {
         method: 'POST',
@@ -274,6 +302,44 @@ export const api = {
       const q = new URLSearchParams(params).toString();
       return request(`/api/warehouse/movements${q ? `?${q}` : ''}`);
     },
+  },
+  // Склад по размерам/партиям (ОТК → склад → отгрузка), без ручного ввода
+  warehouseStock: {
+    // ОТК по партиям
+    batchesPendingQc: () => request('/api/warehouse-stock/batches/pending-qc'),
+    batchById: (id) => request(`/api/warehouse-stock/batches/${id}`),
+    postQcBatch: (data) =>
+      request('/api/warehouse-stock/qc/batch', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    qcPending: () => request('/api/warehouse-stock/qc/pending'),
+    qc: (orderId) => request(`/api/warehouse-stock/qc?order_id=${orderId}`),
+    postQc: (data) =>
+      request('/api/warehouse-stock/qc', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    stock: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/warehouse-stock/stock${q ? `?${q}` : ''}`);
+    },
+    shipments: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/warehouse-stock/shipments${q ? `?${q}` : ''}`);
+    },
+    postShipment: (data) =>
+      request('/api/warehouse-stock/shipments', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+  sewingPlans: {
+    finishBatch: (data) =>
+      request('/api/sewing-plans/batches/finish', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   sizes: {
     list: () => request('/api/sizes'),

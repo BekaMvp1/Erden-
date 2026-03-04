@@ -4,13 +4,29 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
 
 const DEFAULT_TYPES = ['Аксы', 'Аутсорс', 'Наш цех'];
 
+// Этажи: 1 = ФИНИШ, 2–4 = ПОШИВ
+const FLOOR_OPTIONS = [
+  { value: 1, label: '1 этаж (Финиш)' },
+  { value: 2, label: '2 этаж (Пошив)' },
+  { value: 3, label: '3 этаж (Пошив)' },
+  { value: 4, label: '4 этаж (Пошив)' },
+];
+
+const formatFloor = (floor) => {
+  if (floor == null) return '—';
+  const opt = FLOOR_OPTIONS.find((o) => o.value === floor);
+  return opt ? opt.label : `${floor} этаж`;
+};
+
 export function CompleteByFactModal({ task, onClose, onSave, isEditMode }) {
+  const today = new Date().toISOString().slice(0, 10);
   const variants = task.Order?.OrderVariants || [];
   const actualMap = (task.actual_variants || []).reduce(
     (acc, v) => { acc[`${v.color}|${v.size}`] = v.quantity_actual; return acc; },
@@ -34,6 +50,7 @@ export function CompleteByFactModal({ task, onClose, onSave, isEditMode }) {
     }
   }
   const [rows, setRows] = useState(initialRows);
+  const [endDate, setEndDate] = useState(task.end_date || today);
 
   const handleChange = (index, value) => {
     const n = parseInt(value, 10);
@@ -50,68 +67,83 @@ export function CompleteByFactModal({ task, onClose, onSave, isEditMode }) {
         size: r.size,
         quantity_planned: r.quantity_planned,
         quantity_actual: r.quantity_actual,
-      }))
+      })),
+      endDate
     );
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4" onClick={onClose}>
+  const modalContent = (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden" onClick={onClose}>
       <div
-        className="bg-accent-3 dark:bg-dark-900 rounded-xl border border-white/25 p-4 sm:p-6 max-w-3xl w-full h-[95vh] sm:h-auto sm:max-h-[90vh] overflow-auto"
+        className="bg-accent-3 dark:bg-dark-900 rounded-xl border border-white/25 max-w-3xl w-full max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
+        <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text p-4 sm:p-6 pb-0 shrink-0">
           {isEditMode ? 'Редактировать по факту' : 'Завершить по факту'} — #{task.order_id} {task.Order?.title}
         </h3>
-        <form onSubmit={handleSubmit}>
-          <div className="overflow-x-auto -mx-1 mb-4">
-          <table className="w-full text-sm table-fixed min-w-[280px]">
-            <colgroup>
-              <col className="w-[25%]" />
-              <col className="w-[20%]" />
-              <col className="w-[25%]" />
-              <col className="w-[30%]" />
-            </colgroup>
-            <thead>
-              <tr className="bg-accent-2/50 dark:bg-dark-800">
-                <th className="text-left px-4 py-2.5 font-medium">Цвет</th>
-                <th className="text-left px-4 py-2.5 font-medium">Размер</th>
-                <th className="text-left px-4 py-2.5 font-medium">Кол-во план</th>
-                <th className="text-left px-4 py-2.5 font-medium">Кол-во факт</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-t border-white/10">
-                  <td className="px-4 py-2.5">{r.color}</td>
-                  <td className="px-4 py-2.5">{r.size}</td>
-                  <td className="px-4 py-2.5">{r.quantity_planned}</td>
-                  <td className="px-4 py-2.5">
-                    <input
-                      type="number"
-                      min="0"
-                      value={r.quantity_actual}
-                      onChange={(e) => handleChange(i, e.target.value)}
-                      className="w-full min-w-[4rem] px-3 py-1.5 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-          <div className="flex gap-2 justify-end flex-wrap">
-            <button type="submit" className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
-              {isEditMode ? 'Сохранить' : 'Сохранить и завершить'}
-            </button>
-            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text">
-              Отмена
-            </button>
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6 pt-4">
+            <div className="overflow-x-auto -mx-1 mb-4">
+              <table className="w-full text-sm table-fixed min-w-[280px]">
+                <colgroup>
+                  <col className="w-[25%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[25%]" />
+                  <col className="w-[30%]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-accent-2/50 dark:bg-dark-800">
+                    <th className="text-left px-4 py-2.5 font-medium">Цвет</th>
+                    <th className="text-left px-4 py-2.5 font-medium">Размер</th>
+                    <th className="text-left px-4 py-2.5 font-medium">Кол-во план</th>
+                    <th className="text-left px-4 py-2.5 font-medium">Кол-во факт</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i} className="border-t border-white/10">
+                      <td className="px-4 py-2.5">{r.color}</td>
+                      <td className="px-4 py-2.5">{r.size}</td>
+                      <td className="px-4 py-2.5">{r.quantity_planned}</td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          type="number"
+                          min="0"
+                          value={r.quantity_actual}
+                          onChange={(e) => handleChange(i, e.target.value)}
+                          className="w-full min-w-[4rem] px-3 py-1.5 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Дата окончания</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                required
+                className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+              />
+            </div>
+            <div className="flex gap-2 justify-end flex-wrap shrink-0 pt-4">
+              <button type="submit" className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
+                {isEditMode ? 'Сохранить' : 'Сохранить и завершить'}
+              </button>
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text">
+                Отмена
+              </button>
+            </div>
           </div>
         </form>
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 
 export default function Cutting() {
@@ -127,9 +159,11 @@ export default function Cutting() {
   const [expandedTaskIds, setExpandedTaskIds] = useState(new Set());
   const [newTask, setNewTask] = useState({
     order_id: '',
+    floor: '',
     operation: '',
     status: 'Ожидает',
     responsible: '',
+    start_date: '',
   });
 
   // Аксы и Аутсорс — по умолчанию; остальные — из справочника (без дублей)
@@ -171,15 +205,21 @@ export default function Cutting() {
       alert('Выберите заказ');
       return;
     }
+    if (!newTask.floor) {
+      alert('Выберите этаж');
+      return;
+    }
     try {
       await api.cutting.addTask({
         order_id: parseInt(newTask.order_id, 10),
         cutting_type: activeType,
+        floor: parseInt(newTask.floor, 10),
         operation: newTask.operation?.trim() || undefined,
         status: newTask.status,
         responsible: newTask.responsible?.trim() || undefined,
+        start_date: newTask.start_date || undefined,
       });
-      setNewTask({ order_id: '', operation: '', status: 'Ожидает', responsible: '' });
+      setNewTask({ order_id: '', floor: '', operation: '', status: 'Ожидает', responsible: '', start_date: '' });
       setShowAddForm(false);
       const updated = await api.cutting.tasks(activeType);
       setTasks(updated);
@@ -207,11 +247,21 @@ export default function Cutting() {
     }
   };
 
-  const handleCompleteByFact = async (task, actualVariants) => {
+  const handleFloorChange = async (task, newFloor) => {
+    try {
+      await api.cutting.updateTask(task.id, { floor: parseInt(newFloor, 10) });
+      setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, floor: parseInt(newFloor, 10) } : x)));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleCompleteByFact = async (task, actualVariants, endDate) => {
     try {
       await api.cutting.updateTask(task.id, {
         status: 'Готово',
         actual_variants: actualVariants,
+        end_date: endDate || undefined,
       });
       const updated = await api.cutting.tasks(activeType);
       setTasks(updated);
@@ -221,9 +271,12 @@ export default function Cutting() {
     }
   };
 
-  const handleEditActualVariants = async (task, actualVariants) => {
+  const handleEditActualVariants = async (task, actualVariants, endDate) => {
     try {
-      await api.cutting.updateTask(task.id, { actual_variants: actualVariants });
+      await api.cutting.updateTask(task.id, {
+        actual_variants: actualVariants,
+        end_date: endDate || undefined,
+      });
       const updated = await api.cutting.tasks(activeType);
       setTasks(updated);
       setCompleteModalTask(null);
@@ -245,7 +298,7 @@ export default function Cutting() {
     <div>
       <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-4 sm:mb-6">
         <h1 className="text-xl sm:text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Раскрой</h1>
-        {tasks.length > 0 && <PrintButton />}
+        <PrintButton />
       </div>
 
       <p className="no-print text-[#ECECEC]/80 dark:text-dark-text/80 mb-4">
@@ -281,6 +334,29 @@ export default function Cutting() {
             </select>
           </div>
           <div>
+            <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Этаж</label>
+            <select
+              value={newTask.floor}
+              onChange={(e) => setNewTask({ ...newTask, floor: e.target.value })}
+              className="px-3 sm:px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+              required
+            >
+              <option value="">— Выберите этаж —</option>
+              {FLOOR_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Начало раскроя</label>
+            <input
+              type="date"
+              value={newTask.start_date}
+              onChange={(e) => setNewTask({ ...newTask, start_date: e.target.value })}
+              className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+            />
+          </div>
+          <div>
             <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Операция</label>
             <input
               type="text"
@@ -312,7 +388,11 @@ export default function Cutting() {
               className="px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
             />
           </div>
-          <button type="submit" className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
+          <button
+            type="submit"
+            disabled={!newTask.order_id || !newTask.floor}
+            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Добавить
           </button>
         </form>
@@ -330,6 +410,7 @@ export default function Cutting() {
             <thead>
               <tr className="bg-accent-3/80 dark:bg-dark-900 border-b border-white/25 dark:border-white/25">
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Заказ</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Этаж</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Операция</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Статус</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Ответственный</th>
@@ -355,7 +436,8 @@ export default function Cutting() {
                       color: v.color,
                       size: v.Size?.name || '',
                       quantity_planned: v.quantity || 0,
-                      quantity_actual: actualMap[key] ?? v.quantity ?? 0,
+                      // По факту — только после «Завершить по факту», иначе 0
+                      quantity_actual: task.status === 'Готово' ? (actualMap[key] ?? 0) : 0,
                     };
                     seen[key] = row;
                     rows.push(row);
@@ -389,6 +471,21 @@ export default function Cutting() {
                         </button>
                       </div>
                     </td>
+                    <td className="px-4 py-3 align-top">
+                      {task.status === 'Готово' ? (
+                        <span className="text-[#ECECEC]/90 dark:text-dark-text/80">{formatFloor(task.floor)}</span>
+                      ) : (
+                        <select
+                          value={task.floor ?? ''}
+                          onChange={(e) => handleFloorChange(task, e.target.value)}
+                          className="px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text text-sm"
+                        >
+                          {FLOOR_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{task.operation || '—'}</td>
                     <td className="px-4 py-3 align-top">
                       <select
@@ -414,8 +511,12 @@ export default function Cutting() {
                         ) : (
                           <div className="text-sm text-[#ECECEC]/90 dark:text-dark-text/90">
                             <span>План: {rows.reduce((s, r) => s + (r.quantity_planned || 0), 0)}</span>
-                            <span className="mx-2">|</span>
-                            <span>Факт: {rows.reduce((s, r) => s + (r.quantity_actual || 0), 0)}</span>
+                            {task.status === 'Готово' && (
+                              <>
+                                <span className="mx-2">|</span>
+                                <span>Факт: {rows.reduce((s, r) => s + (r.quantity_actual || 0), 0)}</span>
+                              </>
+                            )}
                           </div>
                         )
                       )}
@@ -430,7 +531,7 @@ export default function Cutting() {
                     </td>
                   </tr>
                   <tr className="border-b border-white/15 dark:border-white/15 bg-accent-2/20 dark:bg-dark-900/50">
-                    <td colSpan={6} className="px-4 py-0 overflow-hidden">
+                    <td colSpan={7} className="px-4 py-0 overflow-hidden">
                       <div
                         className={`grid transition-[grid-template-rows] duration-300 ease-out`}
                         style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
@@ -484,10 +585,10 @@ export default function Cutting() {
         <CompleteByFactModal
           task={completeModalTask}
           onClose={() => setCompleteModalTask(null)}
-          onSave={(actualVariants) =>
+          onSave={(actualVariants, endDate) =>
             completeModalTask.status === 'Готово'
-              ? handleEditActualVariants(completeModalTask, actualVariants)
-              : handleCompleteByFact(completeModalTask, actualVariants)
+              ? handleEditActualVariants(completeModalTask, actualVariants, endDate)
+              : handleCompleteByFact(completeModalTask, actualVariants, endDate)
           }
           isEditMode={completeModalTask.status === 'Готово'}
         />

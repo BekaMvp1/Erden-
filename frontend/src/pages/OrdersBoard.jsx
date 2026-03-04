@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { Chip, NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 const FILTERS = [
   { key: 'all', label: 'Все' },
@@ -173,10 +174,11 @@ function BoardHeader({
   setViewMode,
 }) {
   return (
-    <div className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 backdrop-blur px-4 py-4 md:px-6">
+    <div className="no-print sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 backdrop-blur px-4 py-4 md:px-6">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="mr-2 text-xl font-bold tracking-wide text-neon-text">ЗАКАЗЫ</h1>
+          <PrintButton />
 
           <div className="min-w-[260px] flex-1">
             <NeonInput

@@ -1,7 +1,7 @@
 /**
- * Модель: Позиция закупа (ткань, фурнитура и т.д.)
+ * Модель: Позиция закупа (материал)
+ * purchased_sum = purchased_qty * purchased_price
  */
-
 module.exports = (sequelize, DataTypes) => {
   const ProcurementItem = sequelize.define('ProcurementItem', {
     id: {
@@ -13,42 +13,38 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
-    name: {
-      type: DataTypes.STRING(255),
+    material_name: {
+      type: DataTypes.STRING(200),
+      allowNull: false,
+    },
+    planned_qty: {
+      type: DataTypes.DECIMAL(12, 3),
       allowNull: false,
     },
     unit: {
       type: DataTypes.STRING(20),
       allowNull: false,
     },
-    quantity: {
+    purchased_qty: {
       type: DataTypes.DECIMAL(12, 3),
       allowNull: false,
+      defaultValue: 0,
     },
-    price: {
+    purchased_price: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
       defaultValue: 0,
     },
-    total: {
+    purchased_sum: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
       defaultValue: 0,
-    },
-    supplier: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-    },
-    comment: {
-      type: DataTypes.STRING(500),
-      allowNull: true,
     },
   }, {
     tableName: 'procurement_items',
     timestamps: true,
+    updatedAt: false, // в таблице только created_at
     underscored: true,
-    createdAt: 'created_at',
-    updatedAt: false,
   });
   return ProcurementItem;
 };

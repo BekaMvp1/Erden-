@@ -9,9 +9,10 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 const STATUS_COLORS = {
-  Принят: 'bg-yellow-500/20 text-yellow-400',
+  Принят: 'bg-gray-500/20 text-gray-900 dark:text-gray-100',
   'В работе': 'bg-lime-500/20 text-lime-400',
   Готов: 'bg-green-500/20 text-green-400',
   Просрочен: 'bg-red-500/20 text-red-400',
@@ -93,9 +94,10 @@ export default function Dashboard() {
 
   return (
     <div className="text-neon-text">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
+      <div className="no-print flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
         <div className="flex items-center gap-2">
           <h1 className="text-xl md:text-2xl font-bold">Заказы</h1>
+          <PrintButton />
           <NeonButton
             type="button"
             onClick={() => loadOrders()}

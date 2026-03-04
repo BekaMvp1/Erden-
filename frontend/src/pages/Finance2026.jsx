@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
+import PrintButton from '../components/PrintButton';
 
 const MONTH_LABELS = {
   '2026-01': 'Янв', '2026-02': 'Фев', '2026-03': 'Мар', '2026-04': 'Апр',
@@ -110,9 +111,10 @@ export default function Finance2026() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="no-print flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Финансы 2026</h1>
         <div className="flex gap-2">
+          <PrintButton />
           <button
             type="button"
             onClick={exportCsv}

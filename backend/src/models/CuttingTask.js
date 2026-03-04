@@ -30,6 +30,20 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING(255),
       allowNull: true,
     },
+    // Этаж: 1 = ФИНИШ, 2–4 = ПОШИВ
+    floor: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      validate: { min: 1, max: 4 },
+    },
+    start_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    end_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
     actual_variants: {
       type: DataTypes.JSONB,
       allowNull: true,

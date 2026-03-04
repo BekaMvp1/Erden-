@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { usePrintHeader } from '../context/PrintContext';
+import PrintDocHeader from './PrintDocHeader';
 import { api } from '../api';
 import DashboardSummary from './DashboardSummary';
 
@@ -77,6 +79,16 @@ const NAV_ICONS = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
     </svg>
   ),
+  qc: (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  shipments: (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+    </svg>
+  ),
   dispatcher: (
     <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
@@ -102,6 +114,28 @@ export default function Layout() {
   const [connectionError, setConnectionError] = useState(false);
 
   const isReferences = location.pathname === '/references';
+
+  // Заголовок для печати по текущему маршруту
+  const printTitles = {
+    '/': 'Заказы',
+    '/board': 'Панель заказов',
+    '/orders/create': 'Создать заказ',
+    '/procurement': 'Закуп',
+    '/planning': 'Планирование',
+    '/reports': 'Отчёты',
+    '/finance': 'Финансы',
+    '/warehouse': 'Склад',
+    '/qc': 'ОТК',
+    '/shipments': 'Отгрузка',
+    '/cutting': 'Раскрой',
+    '/references': 'Справочники',
+    '/settings': 'Настройки',
+    '/dispatcher': 'Планировщик',
+    '/assistant': 'ИИ Ассистент',
+  };
+  const basePath = location.pathname.replace(/\/$/, '') || '/';
+  const printTitle = printTitles[basePath] || printTitles[location.pathname] || (basePath.startsWith('/cutting') ? 'Раскрой' : basePath.startsWith('/orders/') ? 'Заказ' : 'Документ');
+  usePrintHeader(printTitle, '');
   const isBoard = location.pathname === '/board';
   const isAssistant = location.pathname === '/assistant';
   const isCutting = location.pathname.startsWith('/cutting');
@@ -143,8 +177,9 @@ export default function Layout() {
     ...(user?.role !== 'operator' ? [{ to: '/orders/create', label: 'Создать заказ', icon: 'create' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/procurement', label: 'Закуп', icon: 'procurement' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems }] : []),
-    { to: '/floor-tasks', label: 'Задачи по этажам', icon: 'floorTasks' },
     ...(user?.role !== 'operator' ? [{ to: '/warehouse', label: 'Склад', icon: 'warehouse' }] : []),
+    ...(user?.role !== 'operator' ? [{ to: '/qc', label: 'ОТК', icon: 'qc' }] : []),
+    ...(user?.role !== 'operator' ? [{ to: '/shipments', label: 'Отгрузка', icon: 'shipments' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/planning', label: 'Планирование', icon: 'planning', end: true }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/reports', label: 'Отчёты', icon: 'reports' }] : []),
     ...(user?.role !== 'operator' ? [{ to: '/dispatcher', label: 'Планировщик', icon: 'dispatcher' }] : []),
@@ -165,42 +200,46 @@ export default function Layout() {
         />
       )}
 
-      {/* Sidebar — скрыт на мобильном, выезжает по кнопке */}
+      {/* Sidebar — на десктопе свёрнут (только иконки), при наведении раскрывается с текстами */}
       <aside
-        className={`fixed md:relative inset-y-0 left-0 z-50 w-64 md:w-56 bg-neon-bg2 sidebar-header-border flex flex-col transform transition-transform duration-200 ease-out ${
-          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}
+        className={`fixed md:relative inset-y-0 left-0 z-50 bg-neon-bg2 sidebar-header-border flex flex-col transform transition-all duration-200 ease-out group/sidebar overflow-hidden
+          w-64 md:w-16 md:hover:w-56
+          ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
-        <div className="header-top flex items-center p-4">
-          <h1 className="text-lg font-semibold text-neon-text">Швейная фабрика</h1>
+        <div className="header-top flex items-center p-4 md:px-3 md:justify-center md:group-hover/sidebar:justify-start shrink-0">
+          <h1 className="text-lg font-semibold text-neon-text truncate overflow-hidden whitespace-nowrap">
+            <span className="md:hidden">Швейная фабрика</span>
+            <span className="hidden md:inline md:group-hover/sidebar:hidden">ШФ</span>
+            <span className="hidden md:group-hover/sidebar:inline">Швейная фабрика</span>
+          </h1>
         </div>
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-2 space-y-1 overflow-x-hidden">
           {navItems.map(({ to, label, icon, end, dropdown }) =>
             dropdown ? (
               <div key={to} className="relative">
                 <button
                   onClick={() => setCuttingOpen(!cuttingOpen)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out min-w-0 ${
                     isCutting
                       ? 'bg-primary-600 text-white'
                       : 'text-neon-text/85 hover:bg-white/5 hover:text-neon-text'
                   }`}
                 >
-                  {NAV_ICONS[icon]}
-                  {label}
-                  <svg className={`w-4 h-4 ml-auto transition-transform ${cuttingOpen ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+                  <span className="flex-shrink-0">{NAV_ICONS[icon]}</span>
+                  <span className="hidden md:group-hover/sidebar:inline truncate whitespace-nowrap">{label}</span>
+                  <svg className={`w-4 h-4 ml-auto hidden md:group-hover/sidebar:block flex-shrink-0 transition-transform ${cuttingOpen ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
                 </button>
                 {cuttingOpen && (
-                  <div className="mt-1 ml-4 pl-2 border-l border-white/20 dark:border-white/20 space-y-0.5">
+                  <div className="mt-1 ml-4 pl-2 border-l border-white/20 dark:border-white/20 space-y-0.5 block md:hidden md:group-hover/sidebar:block">
                     {dropdown.map((type) => (
                       <NavLink
                         key={type}
                         to={`/cutting/${encodeURIComponent(type)}`}
                         onClick={() => { setCuttingOpen(false); setMobileMenuOpen(false); }}
                         className={({ isActive }) =>
-                          `block px-3 py-1.5 rounded text-sm ${
+                          `block px-3 py-1.5 rounded text-sm truncate ${
                             isActive
                               ? 'bg-primary-600/80 text-white'
                               : 'text-neon-muted hover:bg-white/5'
@@ -220,15 +259,15 @@ export default function Layout() {
                 end={end}
                 onClick={() => setMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out ${
+                  `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-300 ease-out min-w-0 ${
                     isActive
                       ? 'bg-primary-600 text-white'
                       : 'text-neon-text/85 hover:bg-white/5 hover:text-neon-text'
                   }`
                 }
               >
-                {NAV_ICONS[icon]}
-                {label}
+                <span className="flex-shrink-0">{NAV_ICONS[icon]}</span>
+                <span className="hidden md:group-hover/sidebar:inline truncate whitespace-nowrap">{label}</span>
               </NavLink>
             )
           )}
@@ -264,14 +303,17 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-transparent">
+        <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-transparent relative">
+          <PrintDocHeader />
           {connectionError && (
-            <div className="mb-4 p-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400">
+            <div className="no-print mb-4 p-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400">
               <strong>Сервер не отвечает.</strong> Запустите backend: <code className="bg-black/20 px-1 rounded">cd backend && npm run dev</code>
             </div>
           )}
           {shouldShowSummary && (
-            <DashboardSummary data={summary} loading={summaryLoading} />
+            <div className="no-print">
+              <DashboardSummary data={summary} loading={summaryLoading} />
+            </div>
           )}
           <div key={location.pathname} className="animate-page-enter">
             <Outlet />

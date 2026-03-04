@@ -8,9 +8,11 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { usePrintHeader } from '../context/PrintContext';
 import { NeonCard } from '../components/ui';
 
 const FLOOR_1_HINT = '1 этаж — финиш: ОТК, петля, пуговица, метка, упаковка';
@@ -20,7 +22,7 @@ const PLANNING_WORKSHOP_KEY = 'planning_workshop_id';
 const PLANNING_ORDER_KEY = 'planning_order_id';
 const PLANNING_FROM_KEY = 'planning_from';
 const PLANNING_TO_KEY = 'planning_to';
-const PLANNING_FLOW_OPEN_KEY = 'planning_flow_open';
+const PLANNING_WEEKLY_OPEN_KEY = 'planning_weekly_open';
 
 /** Форматирование даты в YYYY-MM-DD */
 function formatDate(d) {
@@ -123,31 +125,21 @@ export default function Planning() {
   const [capacityWeek, setCapacityWeek] = useState('1000');
   const [applySuccess, setApplySuccess] = useState(false);
 
-  // Параметры потока (калькулятор)
-  const [flowOpen, setFlowOpen] = useState(() => {
+  // Недельное планирование (план на неделю, факт, перенос остатка)
+  const [weeklyOpen, setWeeklyOpen] = useState(() => {
     try {
-      return localStorage.getItem(PLANNING_FLOW_OPEN_KEY) === 'true';
+      return localStorage.getItem(PLANNING_WEEKLY_OPEN_KEY) === 'true';
     } catch {
       return false;
     }
   });
-  const [flowForm, setFlowForm] = useState({
-    shift_hours: 8,
-    product_type: 'dress',
-    mode: 'BY_SHIFT_CAPACITY',
-    Msm: '',
-    Np: '',
-    Kr: '',
-    Su: '',
-    T: '',
-    M: '',
-    operation_time_sec: '',
-    planned_total_ui: '',
-  });
-  const [flowResult, setFlowResult] = useState(null);
-  const [flowLoading, setFlowLoading] = useState(false);
-  const [flowApplyLoading, setFlowApplyLoading] = useState(false);
-  const [flowApplySuccess, setFlowApplySuccess] = useState(false);
+  const [weeklyData, setWeeklyData] = useState(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyEditModal, setWeeklyEditModal] = useState(null);
+  const [weeklySaving, setWeeklySaving] = useState(false);
+
+  // Периоды планирования (месяцы) для переключателя
+  const [periods, setPeriods] = useState([]);
 
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const canEdit = ['admin', 'manager', 'technologist'].includes(user.role);
@@ -269,12 +261,58 @@ export default function Planning() {
     } catch (_) {}
   }, [workshopId, orderId, from, to]);
 
-  // Сохранение состояния блока «Параметры потока»
+  // Сохранение состояния блока «План на неделю»
   useEffect(() => {
     try {
-      localStorage.setItem(PLANNING_FLOW_OPEN_KEY, flowOpen ? 'true' : 'false');
+      localStorage.setItem(PLANNING_WEEKLY_OPEN_KEY, weeklyOpen ? 'true' : 'false');
     } catch (_) {}
-  }, [flowOpen]);
+  }, [weeklyOpen]);
+
+  // Условие загрузки недельного планирования: цех + этаж (для 4-этажного) + месяц из периода
+  const canLoadWeekly =
+    workshopId &&
+    from &&
+    to &&
+    (selectedWorkshop?.floors_count === 1 || (selectedWorkshop?.floors_count === 4 && floorId));
+  const weeklyMonth = from ? from.slice(0, 7) : '';
+
+  // Загрузка списка периодов (для переключателя месяцев)
+  useEffect(() => {
+    if (!workshopId) {
+      setPeriods([]);
+      return;
+    }
+    api.planning.periods().then(setPeriods).catch(() => setPeriods([]));
+  }, [workshopId]);
+
+  // Загрузка недельного планирования (по month или по period_id из выбранного периода)
+  useEffect(() => {
+    if (!canLoadWeekly || !weeklyMonth || !weeklyOpen) {
+      setWeeklyData(null);
+      return;
+    }
+    setWeeklyLoading(true);
+    const params = { month: weeklyMonth, workshop_id: workshopId };
+    if (selectedWorkshop?.floors_count === 4 && floorId) {
+      params.floor_id = floorId;
+    }
+    api.planning
+      .weekly(params)
+      .then((data) => {
+        setWeeklyData(data);
+        // Добавить период из ответа в список, если его ещё нет (например, только что создан)
+        if (data?.period?.id) {
+          setPeriods((prev) => {
+            if (prev.some((p) => p.id === data.period.id)) return prev;
+            return [...prev, data.period].sort(
+              (a, b) => (a.year - b.year) || (a.month - b.month)
+            );
+          });
+        }
+      })
+      .catch(() => setWeeklyData(null))
+      .finally(() => setWeeklyLoading(false));
+  }, [canLoadWeekly, weeklyMonth, workshopId, floorId, selectedWorkshop?.floors_count, weeklyOpen]);
 
   // Шаг 4: этажи по цеху (только если floors_count > 1)
   useEffect(() => {
@@ -380,7 +418,7 @@ export default function Planning() {
       const result = await api.planning.calcCapacity(params);
       setCalcResult(result);
     } catch (err) {
-      setErrorMsg(err.message || 'Ошибка расчёта');
+      setErrorMsg(err.message === 'Мощность не задана' ? 'Мощность не задана. Введите мощность в неделю (1000–5000) или сохраните её.' : (err.message || 'Ошибка расчёта'));
     } finally {
       setCalcLoading(false);
     }
@@ -405,6 +443,11 @@ export default function Planning() {
         if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
         api.planning.modelTable(params).then(setData).catch(() => setData(null));
       }
+      if (canLoadWeekly && weeklyOpen) {
+        const wp = { month: weeklyMonth, workshop_id: workshopId };
+        if (selectedWorkshop?.floors_count === 4 && floorId) wp.floor_id = floorId;
+        api.planning.weekly(wp).then(setWeeklyData).catch(() => setWeeklyData(null));
+      }
     } catch (err) {
       setErrorMsg(err.message || 'Ошибка применения плана');
     } finally {
@@ -412,77 +455,29 @@ export default function Planning() {
     }
   };
 
-  const handleFlowCalc = async () => {
-    setFlowLoading(true);
-    setFlowResult(null);
+  /** Сохранение ручного плана на неделю */
+  const handleSaveWeeklyManual = async () => {
+    if (!weeklyEditModal || !workshopId) return;
+    setWeeklySaving(true);
     setErrorMsg('');
     try {
-      const body = {
-        workshop_id: workshopId ? Number(workshopId) : undefined,
-        floor_id: selectedWorkshop?.floors_count > 1 && floorId ? Number(floorId) : null,
-        from,
-        to,
-        order_id: orderId ? Number(orderId) : undefined,
-        shift_hours: flowForm.shift_hours || 8,
-        product_type: flowForm.product_type || 'dress',
-        mode: flowForm.mode,
-        planned_total_ui: flowForm.planned_total_ui || undefined,
-      };
-      if (flowForm.Msm) body.Msm = parseFloat(flowForm.Msm);
-      if (flowForm.Np) body.Np = parseFloat(flowForm.Np);
-      if (flowForm.Kr) body.Kr = parseFloat(flowForm.Kr);
-      if (flowForm.Su) body.Su = parseFloat(flowForm.Su);
-      if (flowForm.T) body.T = parseFloat(flowForm.T);
-      if (flowForm.M) body.M = parseFloat(flowForm.M);
-      if (flowForm.operation_time_sec) body.operation_time_sec = parseFloat(flowForm.operation_time_sec);
-      const result = await api.planning.flowCalc(body);
-      setFlowResult(result);
-    } catch (err) {
-      setErrorMsg(err.message || 'Ошибка расчёта');
-    } finally {
-      setFlowLoading(false);
-    }
-  };
-
-  /** Распределить и применить план по мощности (flow/apply-auto) */
-  const handleFlowApplyAuto = async () => {
-    if (!flowResult?.capacity_ok || !canApply || !canLoadTable) return;
-    const plannedTotal = flowResult.planned_total_in_period ?? 0;
-    if (plannedTotal <= 0) return;
-    setFlowApplyLoading(true);
-    setErrorMsg('');
-    setFlowApplySuccess(false);
-    try {
-      const body = {
+      await api.planning.weeklyManual({
         workshop_id: Number(workshopId),
-        order_id: Number(orderId),
-        floor_id: selectedWorkshop?.floors_count > 1 && floorId ? Number(floorId) : null,
-        from,
-        to,
-        planned_total: plannedTotal,
-        shift_hours: flowForm.shift_hours || 8,
-        mode: flowForm.mode,
-        product_type: flowForm.product_type || 'dress',
-      };
-      if (flowForm.Msm) body.Msm = parseFloat(flowForm.Msm);
-      if (flowForm.Np) body.Np = parseFloat(flowForm.Np);
-      if (flowForm.Kr) body.Kr = parseFloat(flowForm.Kr);
-      if (flowForm.Su) body.Su = parseFloat(flowForm.Su);
-      if (flowForm.T) body.T = parseFloat(flowForm.T);
-      if (flowForm.M) body.M = parseFloat(flowForm.M);
-      await api.planning.flowApplyAuto(body);
-      setFlowApplySuccess(true);
-      setTimeout(() => setFlowApplySuccess(false), 3000);
-      // Обновить таблицу планирования
-      const params = { workshop_id: workshopId, order_id: orderId, from, to };
-      if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
-      api.planning.modelTable(params).then(setData).catch(() => setData(null));
-      // Пересчитать flow для обновления % загрузки
-      handleFlowCalc();
+        building_floor_id: selectedWorkshop?.floors_count === 4 ? Number(floorId) : null,
+        week_start: weeklyEditModal.week_start,
+        row_key: weeklyEditModal.order_id,
+        planned_manual: weeklyEditModal.planned_manual,
+      });
+      setWeeklyEditModal(null);
+      if (canLoadWeekly && weeklyOpen) {
+        const params = { month: weeklyMonth, workshop_id: workshopId };
+        if (selectedWorkshop?.floors_count === 4 && floorId) params.floor_id = floorId;
+        api.planning.weekly(params).then(setWeeklyData).catch(() => setWeeklyData(null));
+      }
     } catch (err) {
-      setErrorMsg(err.message || 'Ошибка применения плана');
+      setErrorMsg(err.message || 'Ошибка сохранения');
     } finally {
-      setFlowApplyLoading(false);
+      setWeeklySaving(false);
     }
   };
 
@@ -505,6 +500,11 @@ export default function Planning() {
         if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
         api.planning.modelTable(params).then(setData).catch(() => setData(null));
       }
+      if (canLoadWeekly && weeklyOpen) {
+        const wp = { month: weeklyMonth, workshop_id: workshopId };
+        if (selectedWorkshop?.floors_count === 4 && floorId) wp.floor_id = floorId;
+        api.planning.weekly(wp).then(setWeeklyData).catch(() => setWeeklyData(null));
+      }
     } catch (err) {
       setErrorMsg(err.message || 'Ошибка сохранения');
     } finally {
@@ -514,6 +514,9 @@ export default function Planning() {
 
   const showFloorStep = selectedWorkshop?.floors_count > 1;
   const floor1Selected = showFloorStep && Number(floorId) === 1;
+
+  const printSubtitle = [workshopId && selectedWorkshop?.name && `Цех: ${selectedWorkshop.name}`, from && to && `Период: ${from} — ${to}`].filter(Boolean).join(' | ');
+  usePrintHeader('Планирование', printSubtitle || '');
 
   const selectClass = (disabled) =>
     `px-4 py-2 rounded-btn border ${
@@ -541,7 +544,7 @@ export default function Planning() {
     <div>
       <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-6">
         <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">Планирование</h1>
-        {data && <PrintButton />}
+        <PrintButton />
       </div>
 
       {/* Пошаговый фильтр — сетка для ровного расположения */}
@@ -711,256 +714,171 @@ export default function Planning() {
           </div>
         )}
 
-        {/* Блок «Параметры потока» — collapsible */}
+        {/* План на неделю: ручной план, факт, перенос остатка */}
         <div className="no-print mt-6">
           <button
             type="button"
-            onClick={() => setFlowOpen(!flowOpen)}
+            onClick={() => setWeeklyOpen(!weeklyOpen)}
             className="flex items-center gap-2 w-full text-left px-4 py-3 rounded-card bg-neon-surface border border-neon-border hover:shadow-neon transition-colors"
           >
-            <svg className={`w-5 h-5 transition-transform ${flowOpen ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+            <svg className={`w-5 h-5 transition-transform ${weeklyOpen ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
             </svg>
-            <span className="font-medium text-[#ECECEC] dark:text-dark-text">Параметры потока (расчёт)</span>
+            <span className="font-medium text-[#ECECEC] dark:text-dark-text">План на неделю</span>
           </button>
-          {flowOpen && (
-            <div className="mt-2 p-4 rounded-card bg-neon-surface border border-neon-border space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Длительность смены (ч)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="24"
-                    value={flowForm.shift_hours}
-                    onChange={(e) => setFlowForm({ ...flowForm, shift_hours: e.target.value || 8 })}
-                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Тип изделия</label>
+          {weeklyOpen && (
+            <div className="mt-2 p-4 rounded-card bg-neon-surface border border-neon-border">
+              {canLoadWeekly && (
+                <div className="flex flex-wrap items-center gap-3 mb-3">
+                  <label className="text-sm text-[#ECECEC]/80">Месяц:</label>
                   <select
-                    value={flowForm.product_type}
-                    onChange={(e) => setFlowForm({ ...flowForm, product_type: e.target.value })}
-                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
+                    value={weeklyMonth || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__next__') {
+                        const last = periods.length ? periods[periods.length - 1] : null;
+                        if (last) {
+                          const y = last.month === 12 ? last.year + 1 : last.year;
+                          const m = last.month === 12 ? 1 : last.month + 1;
+                          const start = `${y}-${String(m).padStart(2, '0')}-01`;
+                          const end = new Date(y, m, 0);
+                          const endStr = `${y}-${String(m).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+                          setFrom(start);
+                          setTo(endStr);
+                          setDateMode('month');
+                        }
+                        return;
+                      }
+                      const p = periods.find((x) => `${x.year}-${String(x.month).padStart(2, '0')}` === val);
+                      if (p) {
+                        setFrom(p.start_date);
+                        setTo(p.end_date);
+                        setDateMode('month');
+                      }
+                    }}
+                    className="bg-neon-bg border border-neon-border rounded px-3 py-1.5 text-sm text-[#ECECEC] focus:ring-1 focus:ring-primary-400"
                   >
-                    <option value="dress">Платье</option>
-                    <option value="coat">Пальто</option>
-                    <option value="suit">Костюм</option>
-                    <option value="underwear">Бельё</option>
+                    {weeklyMonth && !periods.some((p) => `${p.year}-${String(p.month).padStart(2, '0')}` === weeklyMonth) && (
+                      <option value={weeklyMonth}>
+                        {new Date(weeklyMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+                      </option>
+                    )}
+                    {periods.map((p) => {
+                      const val = `${p.year}-${String(p.month).padStart(2, '0')}`;
+                      const label = new Date(p.year, p.month - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+                      return (
+                        <option key={p.id} value={val}>
+                          {label} {p.status === 'CLOSED' ? '(закрыт)' : ''}
+                        </option>
+                      );
+                    })}
+                    {periods.length > 0 && (() => {
+                      const last = periods[periods.length - 1];
+                      const y = last.month === 12 ? last.year + 1 : last.year;
+                      const m = last.month === 12 ? 1 : last.month + 1;
+                      const nextVal = `${y}-${String(m).padStart(2, '0')}`;
+                      if (nextVal === weeklyMonth) return null;
+                      const nextLabel = new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+                      return (
+                        <option key="next" value="__next__">
+                          + {nextLabel} (новый)
+                        </option>
+                      );
+                    })()}
                   </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-[#ECECEC]/80 mb-1">Режим расчёта</label>
-                  <select
-                    value={flowForm.mode}
-                    onChange={(e) => setFlowForm({ ...flowForm, mode: e.target.value })}
-                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                  >
-                    <option value="BY_SHIFT_CAPACITY">По мощности смены (Mсм)</option>
-                    <option value="BY_WORKERS">По числу рабочих (Np)</option>
-                    <option value="BY_WORKPLACES">По рабочим местам (Kr)</option>
-                    <option value="BY_AREA">По площади (Su)</option>
-                    <option value="BY_T_AND_M">По T и M (трудоёмкость и выпуск)</option>
-                  </select>
-                </div>
-              </div>
-              {/* Динамические поля по режиму */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {flowForm.mode === 'BY_SHIFT_CAPACITY' && (
-                  <div>
-                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Mсм (ед/смена)</label>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={flowForm.Msm}
-                      onChange={(e) => setFlowForm({ ...flowForm, Msm: e.target.value })}
-                      placeholder="Мощность смены"
-                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                    />
-                  </div>
-                )}
-                {flowForm.mode === 'BY_WORKERS' && (
-                  <>
-                    <div>
-                      <label className="block text-sm text-[#ECECEC]/80 mb-1">T — трудоёмкость (сек)</label>
-                      <input
-                        type="number"
-                        min="0.01"
-                        value={flowForm.T}
-                        onChange={(e) => setFlowForm({ ...flowForm, T: e.target.value })}
-                        placeholder="Трудоёмкость"
-                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[#ECECEC]/80 mb-1">Np — число рабочих</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={flowForm.Np}
-                        onChange={(e) => setFlowForm({ ...flowForm, Np: e.target.value })}
-                        placeholder="Количество рабочих"
-                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                      />
-                    </div>
-                  </>
-                )}
-                {flowForm.mode === 'BY_WORKPLACES' && (
-                  <div>
-                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Kr — рабочие места</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={flowForm.Kr}
-                      onChange={(e) => setFlowForm({ ...flowForm, Kr: e.target.value })}
-                      placeholder="Количество рабочих мест"
-                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                    />
-                  </div>
-                )}
-                {flowForm.mode === 'BY_AREA' && (
-                  <div>
-                    <label className="block text-sm text-[#ECECEC]/80 mb-1">Su — площадь (м²)</label>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={flowForm.Su}
-                      onChange={(e) => setFlowForm({ ...flowForm, Su: e.target.value })}
-                      placeholder="Площадь"
-                      className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                    />
-                  </div>
-                )}
-                {flowForm.mode === 'BY_T_AND_M' && (
-                  <>
-                    <div>
-                      <label className="block text-sm text-[#ECECEC]/80 mb-1">T — трудоёмкость (сек)</label>
-                      <input
-                        type="number"
-                        min="0.01"
-                        value={flowForm.T}
-                        onChange={(e) => setFlowForm({ ...flowForm, T: e.target.value })}
-                        placeholder="Трудоёмкость"
-                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[#ECECEC]/80 mb-1">M — сменный выпуск (ед/смена)</label>
-                      <input
-                        type="number"
-                        min="0.01"
-                        value={flowForm.M}
-                        onChange={(e) => setFlowForm({ ...flowForm, M: e.target.value })}
-                        placeholder="Выпуск за смену"
-                        className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                      />
-                    </div>
-                  </>
-                )}
-                <div>
-                  <label className="block text-sm text-[#ECECEC]/80 mb-1">t_op — время операции (сек) — для Нв</label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={flowForm.operation_time_sec}
-                    onChange={(e) => setFlowForm({ ...flowForm, operation_time_sec: e.target.value })}
-                    placeholder="Опционально"
-                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-[#ECECEC]/80 mb-1">План на период (если не из БД)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={flowForm.planned_total_ui}
-                    onChange={(e) => setFlowForm({ ...flowForm, planned_total_ui: e.target.value })}
-                    placeholder="Опционально"
-                    className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] w-full"
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleFlowCalc}
-                disabled={flowLoading || !flowForm.mode}
-                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                {flowLoading ? 'Расчёт...' : 'Рассчитать'}
-              </button>
-              {flowResult && (
-                <div className="mt-4 pt-4 border-t border-white/20 space-y-3">
-                  <h4 className="font-medium text-[#ECECEC] dark:text-dark-text">Результаты</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                    {flowResult.t_sec != null && (
-                      <div>
-                        <span className="text-[#ECECEC]/60">Такт t</span>
-                        <p className="font-medium">{flowResult.t_sec} сек</p>
-                      </div>
-                    )}
-                    {flowResult.Np_calc != null && (
-                      <div>
-                        <span className="text-[#ECECEC]/60">Рабочие Np</span>
-                        <p className="font-medium">{flowResult.Np_calc}</p>
-                      </div>
-                    )}
-                    {flowResult.Kr_calc != null && (
-                      <div>
-                        <span className="text-[#ECECEC]/60">Рабочие места Kr</span>
-                        <p className="font-medium">{flowResult.Kr_calc}</p>
-                      </div>
-                    )}
-                    {flowResult.Nv_per_shift != null && (
-                      <div>
-                        <span className="text-[#ECECEC]/60">Норма выработки Нв</span>
-                        <p className="font-medium">{flowResult.Nv_per_shift} ед/смена</p>
-                      </div>
-                    )}
-                  </div>
-                  {flowResult.period_days != null && flowResult.period_days > 0 && (
-                    <div className="mt-3 space-y-3">
-                      <div className={`p-3 rounded-lg ${flowResult.capacity_ok ? 'bg-accent-2/50 dark:bg-dark-800/50' : 'bg-red-500/20 border border-red-500/50'}`}>
-                        <h5 className="text-sm font-medium text-[#ECECEC] mb-2">Проверка мощности на период</h5>
-                        <p className="text-sm"><span className="text-[#ECECEC]/70">План на период:</span> {flowResult.planned_total_in_period}</p>
-                        <p className="text-sm"><span className="text-[#ECECEC]/70">Мощность на период:</span> {flowResult.capacity_total_in_period}</p>
-                        <p className="text-sm"><span className="text-[#ECECEC]/70">Загрузка:</span> {flowResult.capacity_percent}%</p>
-                        <p className={`text-sm font-medium mt-1 ${flowResult.capacity_ok ? 'text-green-400' : 'text-red-400'}`}>
-                          {flowResult.capacity_ok ? 'Хватает' : 'Не хватает'}
-                        </p>
-                        {!flowResult.capacity_ok && (
-                          <p className="text-sm text-red-400 mt-2">
-                            Перегруз: план ({flowResult.planned_total_in_period}) превышает мощность периода ({flowResult.capacity_total_in_period}). Увеличьте период или уменьшите объём.
-                          </p>
-                        )}
-                      </div>
-                      {flowResult.capacity_ok && canApply && (
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={handleFlowApplyAuto}
-                            disabled={flowApplyLoading}
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
-                          >
-                            {flowApplyLoading ? 'Применение...' : 'Распределить и применить по мощности'}
-                          </button>
-                          {flowApplySuccess && (
-                            <span className="text-sm text-green-400">План успешно применён</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                  {weeklyData?.period?.status === 'CLOSED' && (
+                    <span className="text-sm text-amber-400">Период закрыт — только просмотр</span>
                   )}
-                  {flowResult.notes?.length > 0 && (
-                    <ul className="text-sm text-[#ECECEC]/80 space-y-1">
-                      {flowResult.notes.map((n, i) => (
-                        <li key={i}>{n}</li>
+                </div>
+              )}
+              {!canLoadWeekly ? (
+                <p className="text-sm text-[#ECECEC]/60">Выберите цех, этаж и период (для месяца)</p>
+              ) : weeklyLoading ? (
+                <p className="text-sm text-[#ECECEC]/80">Загрузка...</p>
+              ) : !weeklyData ? (
+                <p className="text-sm text-[#ECECEC]/60">Нет данных</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[600px] text-sm">
+                    <thead>
+                      <tr className="border-b border-white/20">
+                        <th className="text-left px-2 py-2 font-medium text-neon-muted border-r border-white/20">Заказчик / Модель</th>
+                        {weeklyData.weeks?.map((w) => (
+                          <th key={w.week_start} className="text-center px-2 py-2 font-medium text-neon-muted whitespace-nowrap border-r border-white/20">
+                            {w.week_start} — {w.week_end}
+                          </th>
+                        ))}
+                        <th className="text-right px-2 py-2 font-medium text-neon-muted">Итого</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weeklyData.rows?.map((row) => (
+                        <React.Fragment key={row.customer_name}>
+                          {row.orders?.map((ord) => (
+                            <tr key={ord.order_id} className="border-b border-white/10 hover:bg-white/5">
+                              <td className="px-2 py-2 text-[#ECECEC] border-r border-white/20">
+                                <span className="text-[#ECECEC]/70">{row.customer_name}</span> — {ord.order_title}
+                              </td>
+                              {weeklyData.weeks?.map((w) => {
+                                const item = ord.items?.find((i) => i.week_start === w.week_start);
+                                if (!item) return <td key={w.week_start} className="px-2 py-2 text-right border-r border-white/20">—</td>;
+                                return (
+                                  <td key={w.week_start} className="px-2 py-2 text-right border-r border-white/20">
+                                    <div className="space-y-0.5">
+                                      <div title={`План: ${item.planned_total}, Факт: ${item.fact_qty}`}>
+                                        {item.planned_total} / {item.fact_qty}
+                                      </div>
+                                      {canEdit && weeklyData.period?.status !== 'CLOSED' && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setWeeklyEditModal({
+                                              order_id: ord.order_id,
+                                              order_title: ord.order_title,
+                                              week_start: w.week_start,
+                                              week_end: w.week_end,
+                                              planned_manual: item.planned_manual,
+                                            })
+                                          }
+                                          className="text-xs text-primary-400 hover:underline"
+                                        >
+                                          Изменить план
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                              <td className="px-2 py-2 text-right font-medium">
+                                {ord.month_plan} / {ord.month_fact}
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
                       ))}
-                    </ul>
-                  )}
+                      <tr className="border-t-2 border-white/20 font-bold bg-accent-2/30">
+                        <td className="px-2 py-3 text-neon-text border-r border-white/20">Мощность / Загрузка</td>
+                        {weeklyData.week_totals?.map((wt) => (
+                          <td key={wt.week_start} className="px-2 py-3 text-center text-neon-text border-r border-white/20" title={`Мощность: ${wt.capacity_week || 'не задана'}, Загрузка: ${wt.load_week}`}>
+                            {wt.capacity_week > 0 ? wt.capacity_week : '—'} / {wt.load_week}
+                            {wt.capacity_week > 0 && (
+                              <span className="block text-xs font-normal text-[#ECECEC]/70">{wt.utilization}%</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="px-2 py-3 text-right text-neon-text">{weeklyData.totals?.load_month ?? 0}</td>
+                      </tr>
+                      <tr className="border-t border-white/20 font-bold">
+                        <td className="px-2 py-2 text-neon-text border-r border-white/20">Итого по месяцу</td>
+                        {weeklyData.weeks?.map((w) => (
+                          <td key={w.week_start} className="px-2 py-2 border-r border-white/20" />
+                        ))}
+                        <td className="px-2 py-2 text-right text-neon-text">
+                          {weeklyData.totals?.month_plan ?? 0} / {weeklyData.totals?.month_fact ?? 0}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -1018,21 +936,11 @@ export default function Planning() {
                 <p className="font-medium text-[#ECECEC]">{calcResult.total_quantity} ед</p>
               </div>
               <div>
-                <span className="text-[#ECECEC]/60">Факт по раскрою (к распределению)</span>
-                <p className="font-medium text-primary-400">{calcResult.cutting_actual_total || calcResult.cutting_planned_total || calcResult.total_quantity} ед</p>
-              </div>
-              <div>
                 <span className="text-[#ECECEC]/60">Уже выполнено (факт)</span>
                 <p className="font-medium text-[#ECECEC]">{calcResult.actual_total} ед</p>
               </div>
-              {calcResult.cutting_actual_total > 0 && (
-                <div>
-                  <span className="text-[#ECECEC]/60">Факт по раскрою</span>
-                  <p className="font-medium text-[#ECECEC]">{calcResult.cutting_actual_total} ед</p>
-                </div>
-              )}
               <div>
-                <span className="text-[#ECECEC]/60">Остаток (план к выполнению)</span>
+                <span className="text-[#ECECEC]/60">Остаток (к распределению)</span>
                 <p className="font-medium text-[#ECECEC]">{calcResult.remaining} ед</p>
               </div>
               <div>
@@ -1063,8 +971,8 @@ export default function Planning() {
 
             {calcResult.overload && (
               <div className="mt-4 px-4 py-3 rounded-lg bg-red-500/20 border border-red-500 text-red-400 text-sm">
-                Перегруз: остаток ({calcResult.remaining}) превышает мощность периода ({calcResult.total_capacity}).
-                Увеличьте период или уменьшите объём.
+                Не хватает мощности. Остаток {calcResult.remainder_after ?? calcResult.remaining} ед не распределён.
+                Увеличьте период или мощность.
               </div>
             )}
 
@@ -1199,11 +1107,62 @@ export default function Planning() {
         </NeonCard>
       )}
 
-      {/* Модалка редактирования */}
-      {editModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditModal(null)}>
+      {/* Модалка редактирования плана на неделю */}
+      {weeklyEditModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden" onClick={() => setWeeklyEditModal(null)}>
           <div
-            className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25 animate-page-enter"
+            className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
+              План на неделю — {weeklyEditModal.order_title}
+            </h3>
+            <p className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-2">
+              {weeklyEditModal.week_start} — {weeklyEditModal.week_end}
+            </p>
+            <div>
+              <label className="block text-sm text-[#ECECEC]/90 mb-1">План (ручной ввод)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={weeklyEditModal.planned_manual}
+                onChange={(e) =>
+                  setWeeklyEditModal({
+                    ...weeklyEditModal,
+                    planned_manual: parseFloat(e.target.value) || 0,
+                  })
+                }
+                className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+              />
+            </div>
+            <div className="flex gap-2 justify-end mt-6">
+              <button
+                type="button"
+                onClick={() => setWeeklyEditModal(null)}
+                className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveWeeklyManual}
+                disabled={weeklySaving}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {weeklySaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Модалка редактирования */}
+      {editModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden" onClick={() => setEditModal(null)}>
+          <div
+            className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
@@ -1250,7 +1209,8 @@ export default function Planning() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

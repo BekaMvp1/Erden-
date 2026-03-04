@@ -4,10 +4,12 @@
  */
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { useFont } from '../context/FontContext';
 import { api } from '../api';
 import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -73,7 +75,10 @@ export default function Settings() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-neon-text mb-6">Настройки</h1>
+      <div className="no-print flex flex-wrap items-center justify-between gap-4 mb-6">
+        <h1 className="text-2xl font-bold text-neon-text">Настройки</h1>
+        <PrintButton />
+      </div>
 
       {successMsg && (
         <div className="mb-4 p-4 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30">
@@ -199,9 +204,9 @@ export default function Settings() {
         )}
       </div>
 
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="card-neon rounded-card p-6 max-w-md w-full mx-4 border border-red-500/30">
+      {showDeleteConfirm && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden">
+          <div className="card-neon rounded-card p-6 max-w-md w-full border border-red-500/30">
             <h2 className="text-lg font-semibold text-red-400 mb-4">Подтверждение</h2>
             <p className="text-[#ECECEC]/90 dark:text-dark-text/80 mb-6">
               Вы уверены, что хотите удалить все заказы? Это действие нельзя отменить.
@@ -223,7 +228,8 @@ export default function Settings() {
               </NeonButton>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

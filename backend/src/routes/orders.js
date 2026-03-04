@@ -62,19 +62,8 @@ function resolveOrderNameFields({ title, tz_code, model_name }) {
   return { title: finalTitle, tz_code: tzCode, model_name: modelName };
 }
 
-const PROCUREMENT_API_STATUS_TO_DB = {
-  draft: 'Ожидает закуп',
-  sent: 'Частично',
-  received: 'Закуплено',
-  canceled: 'Отменено',
-};
-
-const PROCUREMENT_DB_STATUS_TO_API = {
-  'Ожидает закуп': 'draft',
-  'Частично': 'sent',
-  'Закуплено': 'received',
-  'Отменено': 'canceled',
-};
+const PROCUREMENT_VALID_STATUSES = ['draft', 'sent', 'received'];
+const PROCUREMENT_VALID_UNITS = ['шт', 'метр', 'кг', 'тонн', 'рулон'];
 
 /**
  * Сформировать итоговый title из TZ/MODEL
@@ -85,30 +74,6 @@ function buildOrderTitle(tzCode, modelName, fallbackTitle) {
   if (tz && model) return `${tz} — ${model}`;
   if (fallbackTitle != null && String(fallbackTitle).trim()) return String(fallbackTitle).trim();
   return [tz, model].filter(Boolean).join(' — ');
-}
-
-/**
- * Нормализация статуса закупа из UI в БД
- */
-function mapProcurementStatusToDb(status) {
-  const raw = String(status || '').trim().toLowerCase();
-  if (!raw) return null;
-  if (raw === 'draft' || raw === 'черновик' || raw === 'ожидает закуп') return 'Ожидает закуп';
-  if (raw === 'sent' || raw === 'отправлено' || raw === 'частично') return 'Частично';
-  if (raw === 'received' || raw === 'получено' || raw === 'закуплено') return 'Закуплено';
-  if (raw === 'canceled' || raw === 'отменено') return 'Отменено';
-  return null;
-}
-
-/**
- * Нормализация статуса закупа из БД в API
- */
-function mapProcurementStatusToApi(status) {
-  const value = String(status || '').trim();
-  if (value === 'Закуплено') return 'received';
-  if (value === 'Частично') return 'sent';
-  if (value === 'Отменено') return 'canceled';
-  return 'draft';
 }
 
 /**
@@ -342,14 +307,7 @@ router.post('/', async (req, res, next) => {
         );
       }
 
-      await db.ProcurementRequest.create(
-        {
-          order_id: order.id,
-          status: 'Ожидает закуп',
-          created_by: req.user?.id || null,
-        },
-        { transaction: t }
-      );
+      // Закуп создаётся при сохранении плана (без черновика)
 
       // Создаём 8 этапов панели с плановыми сроками
       const operationIdsByStage = await resolveStageOperationIds(t);
@@ -533,7 +491,7 @@ router.get('/by-workshop', async (req, res, next) => {
 
 /**
  * GET /api/orders/:id/procurement
- * Возвращает данные закупа по заказу (черновик, если заявки ещё нет)
+ * Возвращает данные закупа по заказу (пустой draft, если заявки ещё нет)
  */
 router.get('/:id/procurement', async (req, res, next) => {
   try {
@@ -541,10 +499,7 @@ router.get('/:id/procurement', async (req, res, next) => {
     if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
 
     const order = await db.Order.findByPk(orderId, {
-      include: [
-        { model: db.Client, as: 'Client', attributes: ['id', 'name'] },
-        { model: db.OrderVariant, as: 'OrderVariants', attributes: ['color', 'quantity'] },
-      ],
+      include: [{ model: db.Client, as: 'Client', attributes: ['id', 'name'] }],
     });
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
@@ -554,11 +509,11 @@ router.get('/:id/procurement', async (req, res, next) => {
         return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
       }
     }
-    if (req.user.role === 'operator' && req.user.Sewer) {
+    if (req.user.role === 'operator') {
       const hasMyOps = await db.OrderOperation.count({
-        where: { order_id: order.id, sewer_id: req.user.Sewer.id },
+        where: { order_id: order.id, sewer_id: req.user.Sewer?.id },
       });
-      if (!hasMyOps) {
+      if (req.user.Sewer && !hasMyOps) {
         return res.status(403).json({ error: 'Нет доступа к закупу этого заказа' });
       }
     }
@@ -570,31 +525,32 @@ router.get('/:id/procurement', async (req, res, next) => {
     });
 
     if (!request) {
-      request = await db.ProcurementRequest.create({
+      return res.json({
         order_id: order.id,
-        status: 'Ожидает закуп',
-        created_by: req.user?.id || null,
-      });
-      request = await db.ProcurementRequest.findByPk(request.id, {
-        include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
+        order: {
+          id: order.id,
+          title: order.title,
+          tz_code: order.tz_code || '',
+          model_name: order.model_name || '',
+          client_name: order.Client?.name || '—',
+          total_quantity: order.total_quantity ?? order.quantity ?? 0,
+          deadline: order.deadline,
+        },
+        procurement: { id: null, status: null, due_date: null, total_sum: 0, completed_at: null },
+        items: [],
       });
     }
 
     const items = (request.ProcurementItems || []).map((item) => ({
       id: item.id,
-      material_name: item.name || '',
-      qty: Number(item.quantity || 0),
-      unit: String(item.unit || '').toLowerCase(),
-      price: Number(item.price || 0),
-      sum: Number(item.total || 0),
-      supplier: item.supplier || '',
-      comment: item.comment || '',
+      material_name: item.material_name || '',
+      planned_qty: Number(item.planned_qty || 0),
+      unit: String(item.unit || 'шт').toLowerCase(),
+      purchased_qty: Number(item.purchased_qty || 0),
+      purchased_price: Number(item.purchased_price || 0),
+      purchased_sum: Number(item.purchased_sum || 0),
     }));
-    const totalSum = items.reduce((acc, item) => acc + (Number(item.sum) || 0), 0);
-
-    if (Number(request.total_sum || 0) !== Number(totalSum.toFixed(2))) {
-      await request.update({ total_sum: Number(totalSum.toFixed(2)) });
-    }
+    const totalSum = items.reduce((acc, item) => acc + (Number(item.purchased_sum) || 0), 0);
 
     return res.json({
       order_id: order.id,
@@ -609,10 +565,11 @@ router.get('/:id/procurement', async (req, res, next) => {
       },
       procurement: {
         id: request.id,
-        status: PROCUREMENT_DB_STATUS_TO_API[request.status] || 'draft',
-        status_label: request.status,
-        due_date: request.due_date || null,
+        status: String(request.status || 'draft'),
+        due_date: request.due_date ?? order.deadline ?? null,
         total_sum: Number(totalSum.toFixed(2)),
+        completed_at: request.completed_at ?? null,
+        updated_at: request.updated_at ?? null,
       },
       items,
     });
@@ -622,20 +579,21 @@ router.get('/:id/procurement', async (req, res, next) => {
 });
 
 /**
- * PUT /api/orders/:id/procurement
- * Сохранение закупа из карточки заказа
+ * Обработчик сохранения плана закупа (только material_name, planned_qty, unit)
  */
-router.put('/:id/procurement', async (req, res, next) => {
+async function saveProcurementPlanHandler(req, res, next) {
   let t;
   try {
     const orderId = Number(req.params.id);
     if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
 
     if (!['admin', 'manager', 'technologist'].includes(req.user.role)) {
-      return res.status(403).json({ error: 'У вас только просмотр закупа' });
+      return res.status(403).json({ error: 'Только admin/manager/technologist могут редактировать план закупа' });
     }
 
-    const order = await db.Order.findByPk(orderId, { attributes: ['id', 'floor_id', 'building_floor_id'] });
+    const order = await db.Order.findByPk(orderId, {
+      attributes: ['id', 'title', 'tz_code', 'model_name', 'deadline', 'total_quantity', 'quantity', 'client_id', 'floor_id', 'building_floor_id'],
+    });
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
     if (req.user.role === 'technologist' && req.allowedFloorId) {
@@ -645,7 +603,7 @@ router.put('/:id/procurement', async (req, res, next) => {
       }
     }
 
-    const { due_date, status, items } = req.body || {};
+    const { due_date, items } = req.body || {};
     if (due_date != null && due_date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(due_date))) {
       return res.status(400).json({ error: 'Дата закупа должна быть в формате YYYY-MM-DD' });
     }
@@ -653,65 +611,63 @@ router.put('/:id/procurement', async (req, res, next) => {
       return res.status(400).json({ error: 'Поле items должно быть массивом' });
     }
 
-    const mappedStatus = status ? PROCUREMENT_API_STATUS_TO_DB[status] : null;
-    if (status && !mappedStatus) {
-      return res.status(400).json({ error: 'Статус должен быть: draft, sent, received или canceled' });
-    }
-
+    // Только план: material_name, planned_qty, unit. purchased_* не меняем в этом эндпоинте
     const normalizedItems = [];
     for (const [index, raw] of items.entries()) {
       const materialName = String(raw.material_name || '').trim();
-      const qty = Number(raw.qty);
-      const unit = String(raw.unit || '').trim().toUpperCase();
-      const price = Number(raw.price || 0);
-      const supplier = raw.supplier ? String(raw.supplier).trim() : null;
-      const comment = raw.comment ? String(raw.comment).trim() : null;
+      const plannedQty = Number(raw.planned_qty);
+      const unit = String(raw.unit || 'шт').trim().toLowerCase();
 
-      const allowedUnits = ['РУЛОН', 'КГ', 'ТОННА', 'МЕТР', 'ШТ'];
       if (!materialName) return res.status(400).json({ error: `Материал #${index + 1}: укажите название` });
-      if (!Number.isFinite(qty) || qty <= 0) {
-        return res.status(400).json({ error: `Материал #${index + 1}: количество должно быть больше 0` });
+      if (!Number.isFinite(plannedQty) || plannedQty <= 0) {
+        return res.status(400).json({ error: `Материал #${index + 1}: план должен быть > 0` });
       }
-      if (!allowedUnits.includes(unit)) {
-        return res.status(400).json({ error: `Материал #${index + 1}: единица должна быть рулон/кг/тонн/метр/шт` });
-      }
-      if (!Number.isFinite(price) || price < 0) {
-        return res.status(400).json({ error: `Материал #${index + 1}: цена должна быть >= 0` });
+      if (!PROCUREMENT_VALID_UNITS.includes(unit)) {
+        return res.status(400).json({ error: `Материал #${index + 1}: единица должна быть шт/метр/кг/тонн/рулон` });
       }
 
-      const sum = Number((qty * price).toFixed(2));
-      normalizedItems.push({
-        material_name: materialName,
-        qty,
-        unit,
-        price: Number(price.toFixed(2)),
-        sum,
-        supplier,
-        comment,
-      });
+      normalizedItems.push({ material_name: materialName, planned_qty: plannedQty, unit });
     }
 
     t = await db.sequelize.transaction();
     let request = await db.ProcurementRequest.findOne({
       where: { order_id: orderId },
       transaction: t,
-      lock: t.LOCK.UPDATE,
     });
+
+    const editableStatuses = ['draft', 'Ожидает закуп', 'sent'];
+    if (request && !editableStatuses.includes(String(request.status || ''))) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Редактировать план можно только до завершения закупа' });
+    }
+
+    if (!request && normalizedItems.length === 0) {
+      await t.rollback();
+      const orderEmpty = await db.Order.findByPk(orderId, {
+        include: [{ model: db.Client, as: 'Client', attributes: ['id', 'name'] }],
+      });
+      return res.json({
+        order_id: orderId,
+        order: {
+          id: orderEmpty.id,
+          title: orderEmpty.title,
+          tz_code: orderEmpty.tz_code || '',
+          model_name: orderEmpty.model_name || '',
+          client_name: orderEmpty.Client?.name || '—',
+          total_quantity: orderEmpty.total_quantity ?? orderEmpty.quantity ?? 0,
+          deadline: orderEmpty.deadline,
+        },
+        procurement: { id: null, status: null, due_date: null, total_sum: 0, completed_at: null },
+        items: [],
+      });
+    }
+
     if (!request) {
       request = await db.ProcurementRequest.create(
-        { order_id: orderId, status: mappedStatus || 'Ожидает закуп', created_by: req.user?.id || null },
+        { order_id: orderId, status: 'sent' },
         { transaction: t }
       );
     }
-
-    await request.update(
-      {
-        due_date: due_date || null,
-        status: mappedStatus || request.status,
-        total_sum: Number(normalizedItems.reduce((acc, item) => acc + item.sum, 0).toFixed(2)),
-      },
-      { transaction: t }
-    );
 
     await db.ProcurementItem.destroy({
       where: { procurement_request_id: request.id },
@@ -722,37 +678,48 @@ router.put('/:id/procurement', async (req, res, next) => {
       await db.ProcurementItem.bulkCreate(
         normalizedItems.map((item) => ({
           procurement_request_id: request.id,
-          name: item.material_name,
-          quantity: item.qty,
+          material_name: item.material_name,
+          planned_qty: item.planned_qty,
           unit: item.unit,
-          price: item.price,
-          total: item.sum,
-          supplier: item.supplier,
-          comment: item.comment,
+          purchased_qty: 0,
+          purchased_price: 0,
+          purchased_sum: 0,
         })),
         { transaction: t }
       );
+      await request.update(
+        { due_date: due_date || null, status: 'sent', total_sum: 0 },
+        { transaction: t }
+      );
+    } else {
+      // Черновик не нужен — при пустых items удаляем закуп целиком (items уже очищены выше)
+      await request.destroy({ transaction: t });
     }
 
     await t.commit();
-    await logAudit(req.user.id, 'UPDATE', 'procurement_request', request.id);
+    if (normalizedItems.length > 0) {
+      await logAudit(req.user.id, 'UPDATE', 'procurement_request', request.id);
+    } else {
+      await logAudit(req.user.id, 'DELETE', 'procurement_request', request.id);
+    }
+
     const updatedOrder = await db.Order.findByPk(orderId, {
       include: [{ model: db.Client, as: 'Client', attributes: ['id', 'name'] }],
     });
-    const updatedRequest = await db.ProcurementRequest.findByPk(request.id, {
+    const prAfterSave = await db.ProcurementRequest.findOne({
+      where: { order_id: orderId },
       include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
       order: [[{ model: db.ProcurementItem, as: 'ProcurementItems' }, 'id', 'ASC']],
     });
 
-    const outItems = (updatedRequest.ProcurementItems || []).map((item) => ({
+    const outItems = (prAfterSave?.ProcurementItems || []).map((item) => ({
       id: item.id,
-      material_name: item.name || '',
-      qty: Number(item.quantity || 0),
-      unit: String(item.unit || '').toLowerCase(),
-      price: Number(item.price || 0),
-      sum: Number(item.total || 0),
-      supplier: item.supplier || '',
-      comment: item.comment || '',
+      material_name: item.material_name || '',
+      planned_qty: Number(item.planned_qty || 0),
+      unit: String(item.unit || 'шт').toLowerCase(),
+      purchased_qty: Number(item.purchased_qty || 0),
+      purchased_price: Number(item.purchased_price || 0),
+      purchased_sum: Number(item.purchased_sum || 0),
     }));
 
     return res.json({
@@ -766,17 +733,195 @@ router.put('/:id/procurement', async (req, res, next) => {
         total_quantity: updatedOrder.total_quantity ?? updatedOrder.quantity ?? 0,
         deadline: updatedOrder.deadline,
       },
-      procurement: {
-        id: updatedRequest.id,
-        status: PROCUREMENT_DB_STATUS_TO_API[updatedRequest.status] || 'draft',
-        status_label: updatedRequest.status,
-        due_date: updatedRequest.due_date || null,
-        total_sum: Number(updatedRequest.total_sum || 0),
-      },
+      procurement: prAfterSave
+        ? {
+            id: prAfterSave.id,
+            status: prAfterSave.status,
+            due_date: prAfterSave.due_date || null,
+            total_sum: Number(prAfterSave.total_sum || 0),
+            completed_at: prAfterSave.completed_at || null,
+            updated_at: prAfterSave.updated_at || null,
+          }
+        : { id: null, status: null, due_date: null, total_sum: 0, completed_at: null, updated_at: null },
       items: outItems,
     });
   } catch (err) {
     if (t) await t.rollback().catch(() => {});
+    next(err);
+  }
+}
+
+router.put('/:id/procurement/plan', saveProcurementPlanHandler);
+router.put('/:id/procurement', saveProcurementPlanHandler);
+
+/**
+ * DELETE /api/orders/:id/procurement
+ * Удалить закуп целиком (draft или sent, до завершения). Позволяет начать закуп заново.
+ */
+router.delete('/:id/procurement', async (req, res, next) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    if (!['admin', 'manager', 'technologist'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Только admin/manager/technologist могут удалять закуп' });
+    }
+
+    const order = await db.Order.findByPk(orderId, { attributes: ['id', 'floor_id', 'building_floor_id'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    if (req.user.role === 'technologist' && req.allowedFloorId) {
+      const orderFloor = order.building_floor_id ?? order.floor_id;
+      if (orderFloor != null && Number(orderFloor) !== Number(req.allowedFloorId)) {
+        return res.status(403).json({ error: 'Нет доступа' });
+      }
+    }
+
+    const request = await db.ProcurementRequest.findOne({
+      where: { order_id: orderId },
+      transaction: t,
+    });
+    if (!request) return res.status(404).json({ error: 'Закуп не найден' });
+
+    const deletableStatuses = ['draft', 'Ожидает закуп', 'sent'];
+    if (!deletableStatuses.includes(String(request.status || ''))) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Удалить можно только до завершения закупа' });
+    }
+
+    await db.ProcurementItem.destroy({
+      where: { procurement_request_id: request.id },
+      transaction: t,
+    });
+    await request.destroy({ transaction: t });
+    await t.commit();
+    await logAudit(req.user.id, 'DELETE', 'procurement_request', request.id);
+
+    return res.json({ ok: true, message: 'Закуп удалён' });
+  } catch (err) {
+    await t.rollback().catch(() => {});
+    next(err);
+  }
+});
+
+/**
+ * POST /api/orders/:id/procurement/complete
+ * Отметить закуп как выполненный (status = received, completed_at = now)
+ * + обновить order_operation с stage_key='procurement': actual_qty = order.quantity, status = 'DONE', actual_end_date = today
+ */
+router.post('/:id/procurement/complete', async (req, res, next) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const orderId = Number(req.params.id);
+    const { items: bodyItems } = req.body || {};
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    if (!['admin', 'manager', 'technologist'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Только admin/manager/technologist могут отметить закуп как выполненный' });
+    }
+
+    const order = await db.Order.findByPk(orderId, {
+      attributes: ['id', 'quantity', 'total_quantity', 'floor_id', 'building_floor_id'],
+      transaction: t,
+    });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    if (req.user.role === 'technologist' && req.allowedFloorId) {
+      const orderFloor = order.building_floor_id ?? order.floor_id;
+      if (orderFloor != null && Number(orderFloor) !== Number(req.allowedFloorId)) {
+        return res.status(403).json({ error: 'Нет доступа' });
+      }
+    }
+
+    const pr = await db.ProcurementRequest.findOne({
+      where: { order_id: orderId },
+      include: [{ model: db.ProcurementItem, as: 'ProcurementItems' }],
+      transaction: t,
+    });
+    if (!pr) return res.status(404).json({ error: 'Закуп не найден' });
+    if (pr.status !== 'sent') {
+      return res.status(400).json({ error: 'Отметить как закуплено можно только после отправки (sent)' });
+    }
+
+    // Обновить/создать позиции: purchased_qty, purchased_price, и при необходимости material_name, planned_qty, unit
+    let totalSum = 0;
+    const validUnits = ['шт', 'метр', 'кг', 'тонн', 'рулон'];
+    if (Array.isArray(bodyItems) && bodyItems.length > 0) {
+      for (const it of bodyItems) {
+        const materialName = String(it.material_name || '').trim();
+        const plannedQty = Number(it.planned_qty);
+        const unit = String(it.unit || 'шт').trim().toLowerCase();
+        const pqty = Number(it.purchased_qty) || 0;
+        const pprice = Number(it.purchased_price) || 0;
+        const psum = Number((pqty * pprice).toFixed(2));
+        const id = it.id ? parseInt(it.id, 10) : null;
+        if (id) {
+          const item = (pr.ProcurementItems || []).find((i) => i.id === id);
+          if (!item) continue;
+          const patch = { purchased_qty: pqty, purchased_price: pprice, purchased_sum: psum };
+          if (materialName && Number.isFinite(plannedQty) && plannedQty >= 0 && validUnits.includes(unit)) {
+            patch.material_name = materialName;
+            patch.planned_qty = plannedQty;
+            patch.unit = unit;
+          }
+          await item.update(patch, { transaction: t });
+          totalSum += psum;
+        } else if (materialName && Number.isFinite(plannedQty) && plannedQty >= 0 && validUnits.includes(unit)) {
+          const newItem = await db.ProcurementItem.create(
+            {
+              procurement_request_id: pr.id,
+              material_name: materialName,
+              planned_qty: plannedQty,
+              unit,
+              purchased_qty: pqty,
+              purchased_price: pprice,
+              purchased_sum: psum,
+            },
+            { transaction: t }
+          );
+          totalSum += psum;
+        }
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const orderQty = Number(order.total_quantity ?? order.quantity ?? 0);
+
+    await pr.update(
+      {
+        status: 'received',
+        completed_at: new Date(),
+        ...(totalSum > 0 && { total_sum: Number(totalSum.toFixed(2)) }),
+      },
+      { transaction: t }
+    );
+
+    const stageIds = await resolveStageOperationIds(t);
+    const procOpId = stageIds.procurement;
+    if (procOpId) {
+      const orderOp = await db.OrderOperation.findOne({
+        where: { order_id: orderId, operation_id: procOpId },
+        transaction: t,
+      });
+      if (orderOp) {
+        await orderOp.update(
+          {
+            actual_qty: orderQty,
+            status: 'DONE',
+            actual_end_date: today,
+          },
+          { transaction: t }
+        );
+      }
+    }
+
+    await t.commit();
+    await logAudit(req.user.id, 'UPDATE', 'procurement_request', pr.id);
+
+    return res.json({ ok: true, status: 'received' });
+  } catch (err) {
+    await t.rollback().catch(() => {});
     next(err);
   }
 });

@@ -148,6 +148,7 @@ async function getBoardOrders(req, res, next) {
       include: [
         { model: db.Client, as: 'Client', required: !!q },
         { model: db.OrderStatus, as: 'OrderStatus' },
+        { model: db.ProcurementRequest, as: 'ProcurementRequest', required: false },
         {
           model: db.OrderOperation,
           as: 'OrderOperations',
@@ -213,10 +214,26 @@ async function getBoardOrders(req, res, next) {
       const computedPriority = getPriorityFromDeadline(deadline, todayIso);
       const preStages = STAGES.map((s) => stageMap.get(s.key));
       const doneByStatus = String(plain.OrderStatus?.name || '').toLowerCase().includes('готов');
-      const shippingReadyByProgress = isShippingDone(preStages.map((st) => mapStageOutput(st, false)));
-      const done = doneByStatus || shippingReadyByProgress;
-      const isOverdue = !!(deadline && deadline < todayIso && !done);
+      const isOverdue = !!(deadline && deadline < todayIso);
       const stagesOut = preStages.map((stage) => mapStageOutput(stage, isOverdue));
+
+      // Этап «Закуп»: статус из procurement_requests (draft→NOT_STARTED, sent→IN_PROGRESS, received→DONE)
+      const pr = plain.ProcurementRequest;
+      const procStage = stagesOut.find((s) => s.stage_key === 'procurement');
+      if (procStage && pr) {
+        const prStatus = String(pr.status || '').toLowerCase();
+        if (prStatus === 'received') {
+          procStage.status = 'DONE';
+          procStage.actual_qty = Number(plain.total_quantity ?? plain.quantity ?? 0) || procStage.actual_qty;
+          procStage.percent = 100;
+        } else if (prStatus === 'sent') {
+          procStage.status = isOverdue ? 'OVERDUE' : 'IN_PROGRESS';
+        } else {
+          procStage.status = isOverdue ? 'OVERDUE' : 'NOT_STARTED';
+        }
+      }
+
+      const done = doneByStatus || isShippingDone(stagesOut);
 
       const progressedStages = stagesOut.filter((s) => s.planned_qty > 0);
       const donePercentTotal =

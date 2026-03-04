@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
+import { usePrintHeader } from '../context/PrintContext';
 import { NeonButton, NeonCard, NeonInput, NeonSelect, StatCard } from '../components/ui';
 
 /** Ссылка на Планирование с фильтрами (источник плана/факта) */
@@ -136,6 +137,10 @@ export default function Reports() {
     }
   };
 
+  const workshopName = workshops.find((w) => String(w.id) === String(workshopId))?.name;
+  const printSubtitle = [workshopName && `Цех: ${workshopName}`, from && to && `Период: ${from} — ${to}`].filter(Boolean).join(' | ');
+  usePrintHeader('Отчёты', printSubtitle);
+
   const handleExportCsv = async () => {
     if (!canLoad) return;
     const type = reportType;
@@ -163,7 +168,7 @@ export default function Reports() {
         <h1 className="text-2xl font-bold text-[#ECECEC] dark:text-dark-text">
           Отчёты
         </h1>
-        {canLoad && <PrintButton />}
+        <PrintButton />
       </div>
 
       {/* Фильтры */}
@@ -247,13 +252,13 @@ export default function Reports() {
       </div>
 
       {error && (
-        <div className="mb-4 px-4 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm">
+        <div className="no-print mb-4 px-4 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm">
           {error}
         </div>
       )}
 
       {!canLoad && (
-        <NeonCard className="p-12 text-center text-neon-muted">
+        <NeonCard className="no-print p-12 text-center text-neon-muted">
           Выберите цех и период для отображения отчёта
         </NeonCard>
       )}
@@ -261,9 +266,9 @@ export default function Reports() {
       {canLoad && (
         <>
           {loading ? (
-            <div className="py-12 text-center text-[#ECECEC]/80">Загрузка...</div>
+            <div className="no-print py-12 text-center text-[#ECECEC]/80">Загрузка...</div>
           ) : (
-            <div className="space-y-6">
+            <div className="print-area space-y-6">
               {/* KPI карточки */}
               {kpi && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">

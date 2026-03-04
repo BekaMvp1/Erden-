@@ -1,5 +1,7 @@
 /**
- * Стили печати — скрыть меню, кнопки, оставить только print-area
+ * Стили печати — два режима (bw/color), скрытие UI, чёткие таблицы
+ * Режим: data-print-theme="bw" | "color" на html (по умолчанию bw)
+ * Задаётся через VITE_PRINT_THEME
  */
 
 /* Элементы только для печати — скрыты на экране */
@@ -7,124 +9,281 @@
   display: none !important;
 }
 
+/* Утилиты для разрывов страниц */
+.print-page-break {
+  page-break-before: always;
+}
+.print-avoid-break {
+  page-break-inside: avoid;
+}
+
 @media print {
   .print-only {
     display: block !important;
   }
-
-  /* Скрыть всё, кроме печатной области */
-  body * {
-    visibility: hidden;
+  .print-only-flex {
+    display: flex !important;
+  }
+  .print-only-inline {
+    display: inline !important;
   }
 
-  .print-area,
-  .print-area * {
-    visibility: visible;
+  /* Режим bw (по умолчанию): строгий чёрно-белый */
+  html[data-print-theme="bw"],
+  html:not([data-print-theme]) {
+    --print-bg: #fff;
+    --print-text: #000;
+    --print-border: #000;
+    --print-th-bg: #f5f5f5;
+    --print-accent: #000;
   }
 
-  .print-area {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important;
-    max-width: none !important;
-    background: white !important;
-    color: #1a1a1a !important;
+  /* Режим color: минимальный акцент */
+  html[data-print-theme="color"] {
+    --print-bg: #fff;
+    --print-text: #1a1a1a;
+    --print-border: #333;
+    --print-th-bg: #f5f5f5;
+    --print-accent: #2563eb;
+  }
+
+  /* Глобальные стили при печати */
+  html,
+  body {
+    background: var(--print-bg) !important;
+    color: var(--print-text) !important;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+    font-size: 12px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  * {
     box-shadow: none !important;
-    border: none !important;
+    border-radius: 0 !important;
   }
 
-  /* Скрыть элементы с классом no-print */
-  .no-print,
-  .no-print * {
-    visibility: hidden !important;
-    display: none !important;
-  }
-
-  /* Сайдбар, хедер, панель ИИ — не печатать */
+  /* Скрыть весь UI при печати */
   aside,
   header,
   nav,
   [role="navigation"],
   .sidebar,
   .header-top,
-  .panel-right-border {
+  .sidebar-header-border,
+  .no-print,
+  .panel-right-border,
+  button:not(.print-show),
+  [role="button"]:not(.print-show),
+  .btn-neon,
+  .card-neon > form,
+  input[type="button"],
+  input[type="submit"],
+  input[type="checkbox"],
+  select,
+  textarea,
+  [class*="filter"],
+  [class*="toolbar"],
+  .fixed,
+  .fixed.inset-0,
+  [data-modal],
+  [aria-modal="true"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Скрыть иконки и кнопки внутри контента */
+  .print-area button,
+  .print-area [role="button"],
+  .print-area svg:not(.print-show),
+  .print-area .inline-flex.gap-2 {
     display: none !important;
   }
 
-  /* Таблицы — границы для печати */
-  .print-area table {
-    border-collapse: collapse;
-    width: 100%;
+  /* Скрыть весь UI, оставить только шапку и контент */
+  body * {
+    visibility: hidden;
   }
 
+  #print-doc-header,
+  #print-doc-header *,
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  #print-doc-header {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+  }
+
+  .print-area {
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin-top: 0 !important;
+    padding-top: 8px !important;
+    background: var(--print-bg) !important;
+    color: var(--print-text) !important;
+    box-shadow: none !important;
+  }
+
+  /* Принудительно чёрный текст в print-area — никаких жёлтых/янтарных цветов */
+  .print-area,
+  .print-area *,
+  .print-area [class*="text-yellow"],
+  .print-area [class*="text-amber"],
+  .print-area [class*="text-primary"],
+  .print-area [class*="text-lime"],
+  .print-area [class*="text-green"],
+  .print-area [class*="text-red"],
+  .print-area [class*="text-blue"],
+  .print-area [class*="text-orange"],
+  .print-area [class*="text-emerald"],
+  .print-area [class*="text-sky"] {
+    color: var(--print-text) !important;
+  }
+
+  /* Контейнер main при печати: только шапка + print-area в потоке */
+  main {
+    display: block !important;
+    padding: 0 !important;
+  }
+
+  /* Шапка документа */
+  #print-doc-header {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--print-border);
+    font-size: 12px;
+  }
+  #print-doc-header .print-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 0 0 4px 0;
+    color: var(--print-text) !important;
+  }
+  #print-doc-header .print-subtitle {
+    font-size: 11px;
+    margin: 0;
+    color: var(--print-text) !important;
+    opacity: 0.85;
+  }
+  #print-doc-header .print-date {
+    font-size: 11px;
+    color: var(--print-text) !important;
+    white-space: nowrap;
+  }
+  html[data-print-theme="color"] #print-doc-header {
+    border-bottom-color: var(--print-accent);
+  }
+
+  /* Таблицы — чёткие границы */
+  .print-area table,
+  table.print-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  .print-area table thead,
+  table.print-table thead {
+    display: table-header-group;
+  }
   .print-area table th,
-  .print-area table td {
-    border: 1px solid #333 !important;
-    padding: 6px 8px !important;
-    color: #1a1a1a !important;
-    background: white !important;
+  .print-area table td,
+  table.print-table th,
+  table.print-table td {
+    border: 1px solid var(--print-border) !important;
+    padding: 4px 6px !important;
+    vertical-align: top !important;
+    color: var(--print-text) !important;
+    background: var(--print-bg) !important;
+    word-break: break-word;
+    white-space: normal;
   }
-
-  .print-area table th {
-    background: #f0f0f0 !important;
+  .print-area table th,
+  table.print-table th {
+    background: var(--print-th-bg) !important;
     font-weight: 600;
   }
-
-  /* Заголовок документа */
-  .print-title {
-    font-size: 18px;
-    font-weight: 700;
-    margin-bottom: 16px;
-    color: #1a1a1a !important;
+  .print-area table tr,
+  table.print-table tr {
+    page-break-inside: avoid;
   }
 
-  .print-subtitle {
-    font-size: 14px;
-    color: #444 !important;
-    margin-bottom: 12px;
+  /* Badges/статусы — преобразовать в текст (убрать цветные фоны), только чёрный текст */
+  .print-area [class*="bg-green"],
+  .print-area [class*="bg-amber"],
+  .print-area [class*="bg-lime"],
+  .print-area [class*="bg-yellow"],
+  .print-area [class*="bg-red"],
+  .print-area [class*="bg-blue"],
+  .print-area [class*="bg-gray"],
+  .print-area [class*="text-yellow"],
+  .print-area [class*="text-amber"],
+  .print-area [class*="text-primary"],
+  .print-area [class*="text-lime"],
+  .print-area [class*="text-green"],
+  .print-area [class*="text-red"],
+  .print-area [class*="text-blue"],
+  .print-area span[class*="px-2"][class*="py-0.5"][class*="rounded"],
+  .print-area .chip {
+    background: transparent !important;
+    border: 1px solid var(--print-border) !important;
+    color: var(--print-text) !important;
   }
 
-  /* Убрать фоны и тени */
-  .print-area .bg-accent-3\/80,
-  .print-area .bg-dark-900,
+  /* Убрать градиенты и цветные фоны */
+  .print-area .card-neon,
+  .print-area [class*="gradient"],
+  .print-area [class*="bg-accent"],
+  .print-area [class*="bg-dark"],
+  .print-area .rounded-card,
   .print-area .rounded-xl {
-    background: white !important;
-    border: 1px solid #ddd !important;
-    border-radius: 0 !important;
+    background: var(--print-bg) !important;
+    box-shadow: none !important;
+    border: 1px solid var(--print-border) !important;
   }
 
-  /* Ссылки — показать как текст */
+  /* Заголовок внутри print-area */
+  .print-area .print-title,
+  .print-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+    color: var(--print-text) !important;
+  }
+  .print-area .print-subtitle {
+    font-size: 11px;
+    margin-bottom: 8px;
+    color: var(--print-text) !important;
+    opacity: 0.9;
+  }
+
+  /* Ссылки — как текст */
   .print-area a {
-    color: #1a1a1a !important;
+    color: var(--print-text) !important;
     text-decoration: none;
   }
 
-  /* Кнопки, инпуты и селекты в print-area — скрыть (значения видны при печати) */
-  .print-area button,
-  .print-area input[type="button"],
-  .print-area input[type="submit"],
-  .print-area [role="button"] {
-    display: none !important;
-  }
-
-  /* Селекты — показать как текст (браузер обычно выводит выбранное значение) */
+  /* Инпуты/селекты — показать значение как текст */
+  .print-area input:not([type="hidden"]),
   .print-area select {
-    border: none !important;
-    background: transparent !important;
-    appearance: none !important;
-    -webkit-appearance: none !important;
+    border: 1px solid var(--print-border) !important;
+    background: var(--print-bg) !important;
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   /* Страница */
   @page {
     margin: 1.5cm;
     size: A4;
-  }
-
-  body {
-    background: white !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
   }
 }
