@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
@@ -90,10 +90,13 @@ export default function OrderDetails() {
   const [expandedCuttingTaskIds, setExpandedCuttingTaskIds] = useState(() => new Set());
   const [planModelData, setPlanModelData] = useState(null);
   const [planModelLoading, setPlanModelLoading] = useState(false);
-  const [planEditModal, setPlanEditModal] = useState(null);
-  const [planSaving, setPlanSaving] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [procurement, setProcurement] = useState(null);
+  const [rostovkaEditOpen, setRostovkaEditOpen] = useState(false);
+  const [rostovkaItems, setRostovkaItems] = useState([]);
+  const [rostovkaSizes, setRostovkaSizes] = useState([]);
+  const [rostovkaSaving, setRostovkaSaving] = useState(false);
+  const [rostovkaError, setRostovkaError] = useState('');
   const editColorInputRef = useRef(null);
   const editColorDropdownRef = useRef(null);
 
@@ -193,33 +196,6 @@ export default function OrderDetails() {
     api.planning.modelTable(params).then(setPlanModelData).catch(() => setPlanModelData(null));
   };
 
-  const handleSavePlanDay = async () => {
-    if (!planEditModal || !order) return;
-    setPlanSaving(true);
-    setErrorMsg('');
-    try {
-      const payload = {
-        order_id: order.id,
-        workshop_id: order.workshop_id,
-        date: planEditModal.date,
-        planned_qty: planEditModal.planned_qty,
-        actual_qty: planEditModal.actual_qty,
-      };
-      if ((order.Workshop?.floors_count ?? 0) > 1 && order.building_floor_id) {
-        payload.floor_id = order.building_floor_id;
-      }
-      await api.planning.updateDay(payload);
-      setPlanEditModal(null);
-      loadPlanModelData();
-      setSuccessMsg('План сохранён');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err) {
-      setErrorMsg(err.message || 'Ошибка сохранения');
-    } finally {
-      setPlanSaving(false);
-    }
-  };
-
   useEffect(() => {
     if (showEditModal) {
       api.references.clients().then(setClients);
@@ -275,6 +251,8 @@ export default function OrderDetails() {
         planned_month: order.planned_month || '',
         floor_id: order.floor_id || '',
         status_id: order.status_id,
+        order_height_type: order.order_height_type === 'CUSTOM' ? 'CUSTOM' : 'PRESET',
+        order_height_value: order.order_height_value ?? 170,
       });
       const variants = order.variants || [];
       const sizes = order.sizes || [];
@@ -441,6 +419,10 @@ export default function OrderDetails() {
         floor_id: editForm.floor_id ? parseInt(editForm.floor_id, 10) : undefined,
         sizes: editSelectedSizes,
         variants,
+        order_height_type: editForm.order_height_type === 'CUSTOM' ? 'CUSTOM' : 'PRESET',
+        order_height_value: editForm.order_height_type === 'CUSTOM'
+          ? Math.min(220, Math.max(120, parseInt(editForm.order_height_value, 10) || 170))
+          : (editForm.order_height_value === 165 ? 165 : 170),
       };
       if (['admin', 'manager'].includes(user?.role)) {
         payload.status_id = parseInt(editForm.status_id, 10);
@@ -745,6 +727,12 @@ export default function OrderDetails() {
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Цех пошива</td>
                     <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">{order.Floor?.name || '—'}</td>
                   </tr>
+                  <tr className="border-b border-white/15 dark:border-white/15">
+                    <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC]/80 dark:text-dark-text/80">Рост</td>
+                    <td className="px-0 sm:px-4 py-2 sm:py-3 text-[#ECECEC] dark:text-dark-text">
+                      {order.order_height_value != null ? `Рост: ${order.order_height_value}` : '—'}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
               {/* Цвета и размеры */}
@@ -837,6 +825,83 @@ export default function OrderDetails() {
                   </div>
                 );
               })()}
+
+              {/* Ростовка (размерная матрица по справочнику размеров) */}
+              <div className="mt-6 pt-4 border-t border-white/15 dark:border-white/15">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Ростовка</p>
+                  {canEditOrder(user) && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setRostovkaError('');
+                        try {
+                          const [rostovkaRes, sizesRes] = await Promise.all([
+                            api.orders.getRostovka(order.id),
+                            api.sizes.list(),
+                          ]);
+                          setRostovkaSizes(sizesRes || []);
+                          const bySize = {};
+                          (rostovkaRes?.items || order.OrderRostovkas || []).forEach((r) => {
+                            bySize[r.size_id ?? r.Size?.id] = Number(r.planned_qty) || 0;
+                          });
+                          setRostovkaItems(
+                            (sizesRes || []).map((s) => ({
+                              size_id: s.id,
+                              code: s.code || s.name,
+                              planned_qty: bySize[s.id] ?? 0,
+                            }))
+                          );
+                          setRostovkaEditOpen(true);
+                        } catch (e) {
+                          setRostovkaError(e.message || 'Ошибка загрузки');
+                        }
+                      }}
+                      className="text-sm text-primary-400 hover:underline"
+                    >
+                      Редактировать
+                    </button>
+                  )}
+                </div>
+                {(() => {
+                  const rows = order.OrderRostovkas || [];
+                  const total = rows.reduce((s, r) => s + Number(r.planned_qty || 0), 0);
+                  const orderQty = order.total_quantity ?? order.quantity ?? 0;
+                  if (rows.length === 0) {
+                    return (
+                      <p className="text-sm text-amber-400/90 dark:text-amber-400/90">
+                        Ростовка не заполнена
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-white/20">
+                            <th className="text-left px-3 py-2 font-medium text-[#ECECEC] dark:text-dark-text/90">Размер</th>
+                            <th className="text-right px-3 py-2 font-medium text-[#ECECEC] dark:text-dark-text/90">Количество</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r) => (
+                            <tr key={r.id || r.size_id} className="border-b border-white/15">
+                              <td className="px-3 py-2 text-[#ECECEC] dark:text-dark-text">{r.Size?.code ?? r.Size?.name ?? r.size_id}</td>
+                              <td className="px-3 py-2 text-right">{r.planned_qty ?? 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-b border-white/20 font-medium">
+                            <td className="px-3 py-2 text-[#ECECEC] dark:text-dark-text">Итого</td>
+                            <td className="px-3 py-2 text-right">{total} / {orderQty}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>
@@ -1129,6 +1194,27 @@ export default function OrderDetails() {
             const plannedSum = displayRows.reduce((s, r) => s + (r.planned_qty ?? 0), 0);
             const actualSum = displayRows.reduce((s, r) => s + (r.actual_qty ?? 0), 0);
             return (
+            <>
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <Link
+                  to={`/planning?order_id=${order.id}${order.workshop_id ? `&workshop_id=${order.workshop_id}` : ''}`}
+                  className="text-sm px-3 py-1.5 rounded-lg bg-primary-600/80 text-white hover:bg-primary-600"
+                >
+                  Открыть в Планировании
+                </Link>
+                <Link
+                  to={`/sewing${order.id ? `?order_id=${order.id}` : ''}`}
+                  className="text-sm px-3 py-1.5 rounded-lg bg-primary-600/80 text-white hover:bg-primary-600"
+                >
+                  Открыть пошив
+                </Link>
+                <Link
+                  to="/qc"
+                  className="text-sm px-3 py-1.5 rounded-lg bg-primary-600/80 text-white hover:bg-primary-600"
+                >
+                  Открыть ОТК
+                </Link>
+              </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[400px]">
                 <thead>
@@ -1136,9 +1222,6 @@ export default function OrderDetails() {
                     <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Дата</th>
                     <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">План</th>
                     <th className="text-right px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Факт</th>
-                    {user?.role !== 'operator' && (
-                      <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Действия</th>
-                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1147,98 +1230,20 @@ export default function OrderDetails() {
                       <td className="px-4 py-2 text-[#ECECEC] dark:text-dark-text">{row.date}</td>
                       <td className="px-4 py-2 text-right text-[#ECECEC]/90 dark:text-dark-text/80">{row.planned_qty}</td>
                       <td className="px-4 py-2 text-right text-[#ECECEC]/90 dark:text-dark-text/80">{row.actual_qty}</td>
-                      {user?.role !== 'operator' && (
-                        <td className="px-4 py-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPlanEditModal({
-                                order_id: order.id,
-                order_title: displayOrderName,
-                                date: row.date,
-                                planned_qty: row.planned_qty ?? 0,
-                                actual_qty: row.actual_qty ?? 0,
-                              })
-                            }
-                            className="text-xs px-2 py-1 rounded bg-primary-600 text-white hover:bg-primary-700"
-                          >
-                            Редактировать
-                          </button>
-                        </td>
-                      )}
                     </tr>
                   ))}
                   <tr className="bg-accent-2/50 dark:bg-dark-800 border-t-2 border-white/25 font-bold">
                     <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text">Итого</td>
                     <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{plannedSum}</td>
                     <td className="px-4 py-3 text-right text-[#ECECEC] dark:text-dark-text">{actualSum}</td>
-                    {user?.role !== 'operator' && <td className="px-4 py-3" />}
                   </tr>
                 </tbody>
               </table>
             </div>
+            </>
             );
           })()}
         </div>
-      )}
-
-      {/* Модалка редактирования плана по дню */}
-      {planEditModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-hidden" onClick={() => setPlanEditModal(null)}>
-          <div
-            className="bg-accent-3 dark:bg-dark-900 rounded-xl p-6 max-w-md w-full border border-white/25 dark:border-white/25 animate-page-enter"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">
-              Редактировать — {planEditModal.order_title}
-            </h3>
-            <p className="text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-2">{planEditModal.date}</p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-[#ECECEC]/90 mb-1">План</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={planEditModal.planned_qty}
-                  onChange={(e) =>
-                    setPlanEditModal({ ...planEditModal, planned_qty: parseInt(e.target.value, 10) || 0 })
-                  }
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-[#ECECEC]/90 mb-1">Факт</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={planEditModal.actual_qty}
-                  onChange={(e) =>
-                    setPlanEditModal({ ...planEditModal, actual_qty: parseInt(e.target.value, 10) || 0 })
-                  }
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end mt-6">
-              <button
-                type="button"
-                onClick={() => setPlanEditModal(null)}
-                className="px-4 py-2 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={handleSavePlanDay}
-                disabled={planSaving}
-                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                {planSaving ? 'Сохранение...' : 'Сохранить'}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
       )}
 
       {showOperationsSection && (
@@ -1488,6 +1493,39 @@ export default function OrderDetails() {
                       <option key={f.id} value={f.id}>{f.name}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Рост</label>
+                  <select
+                    value={editForm.order_height_type === 'CUSTOM' ? 'CUSTOM' : String(editForm.order_height_value ?? 170)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'CUSTOM') {
+                        setEditForm({ ...editForm, order_height_type: 'CUSTOM', order_height_value: editForm.order_height_value ?? 170 });
+                      } else {
+                        setEditForm({ ...editForm, order_height_type: 'PRESET', order_height_value: v === '165' ? 165 : 170 });
+                      }
+                    }}
+                    className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+                  >
+                    <option value="165">165</option>
+                    <option value="170">170</option>
+                    <option value="CUSTOM">Другое</option>
+                  </select>
+                  {editForm.order_height_type === 'CUSTOM' && (
+                    <input
+                      type="number"
+                      min={120}
+                      max={220}
+                      value={editForm.order_height_value ?? ''}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        setEditForm({ ...editForm, order_height_value: Number.isNaN(n) ? 170 : Math.min(220, Math.max(120, n)) });
+                      }}
+                      className="mt-1 w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+                      placeholder="120–220"
+                    />
+                  )}
                 </div>
                 {['admin', 'manager'].includes(user?.role) && (
                   <div>
@@ -1755,6 +1793,90 @@ export default function OrderDetails() {
                 className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-medium hover:bg-red-500"
               >
                 Удалить
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {rostovkaEditOpen && order && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto" onClick={() => !rostovkaSaving && setRostovkaEditOpen(false)}>
+          <div className="bg-neon-bg2 dark:bg-dark-900 rounded-xl p-4 sm:p-6 max-w-md w-full border border-neon-border dark:border-white/25 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-neon-text dark:text-dark-text mb-2">Ростовка</h2>
+            <p className="text-sm text-neon-muted dark:text-dark-text/70 mb-4">
+              Сумма по размерам должна равняться количеству заказа: <strong>{order.total_quantity ?? order.quantity}</strong>
+            </p>
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/20">
+                    <th className="text-left py-2 text-neon-muted">Размер</th>
+                    <th className="text-right py-2 text-neon-muted">Количество</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rostovkaItems.map((it) => (
+                    <tr key={it.size_id} className="border-b border-white/10">
+                      <td className="py-2 text-neon-text">{it.code}</td>
+                      <td className="py-2 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={it.planned_qty}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            setRostovkaItems((prev) =>
+                              prev.map((x) => (x.size_id === it.size_id ? { ...x, planned_qty: Number.isNaN(v) ? 0 : Math.max(0, v) } : x))
+                            );
+                          }}
+                          className="w-20 text-right px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-neon-text"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-sm mt-2 text-neon-muted">
+              Итого: {rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0)} / {order.total_quantity ?? order.quantity}
+              {rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0) !== (order.total_quantity ?? order.quantity) && (
+                <span className="text-red-400 ml-2">Сумма должна равняться количеству заказа</span>
+              )}
+            </p>
+            {rostovkaError && <p className="text-sm text-red-400 mt-2">{rostovkaError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                disabled={rostovkaSaving}
+                onClick={async () => {
+                  const total = rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0);
+                  const orderQty = order.total_quantity ?? order.quantity ?? 0;
+                  if (total !== orderQty) {
+                    setRostovkaError(`Сумма (${total}) должна равняться количеству заказа (${orderQty})`);
+                    return;
+                  }
+                  setRostovkaSaving(true);
+                  setRostovkaError('');
+                  try {
+                    await api.orders.saveRostovka(order.id, {
+                      items: rostovkaItems.filter((i) => (Number(i.planned_qty) || 0) > 0).map((i) => ({ size_id: i.size_id, planned_qty: i.planned_qty })),
+                    });
+                    loadOrder();
+                    setRostovkaEditOpen(false);
+                  } catch (e) {
+                    setRostovkaError(e.message || 'Ошибка сохранения');
+                  } finally {
+                    setRostovkaSaving(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {rostovkaSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+              <button type="button" onClick={() => !rostovkaSaving && setRostovkaEditOpen(false)} className="px-4 py-2 rounded-lg bg-accent-1/30 text-neon-text" disabled={rostovkaSaving}>
+                Отмена
               </button>
             </div>
           </div>

@@ -17,7 +17,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       model_size_id: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
+        comment: 'Легаси: при учёте по model_size',
+      },
+      size_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: 'Учёт по справочнику размеров (ростовка)',
       },
       planned_qty: {
         type: DataTypes.DECIMAL(12, 3),

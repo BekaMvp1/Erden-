@@ -307,6 +307,7 @@ router.put('/day', async (req, res, next) => {
     const period = await requireActivePeriodForDate(db, dateStr);
 
     const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
+    const actual = actual_qty != null ? Math.max(0, parseInt(actual_qty, 10) || 0) : null;
     const notesVal = typeof notes === 'string' ? notes.trim() || null : null;
 
     const [row, created] = await db.ProductionPlanDay.findOrCreate({
@@ -319,13 +320,15 @@ router.put('/day', async (req, res, next) => {
       },
       defaults: {
         planned_qty: planned,
-        actual_qty: 0,
+        actual_qty: actual != null ? actual : 0,
         notes: notesVal,
       },
     });
 
     if (!created) {
-      await row.update({ planned_qty: planned, notes: notesVal });
+      const updatePayload = { planned_qty: planned, notes: notesVal };
+      if (actual != null) updatePayload.actual_qty = actual;
+      await row.update(updatePayload);
     }
 
     await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), [dateStr], period.id);
@@ -337,14 +340,14 @@ router.put('/day', async (req, res, next) => {
   }
 });
 
-/** PUT /api/planning/daily — body: { floor_id, row_key, date, qty } или { order_id, workshop_id, date, planned_qty } */
+/** PUT /api/planning/daily — body: { floor_id, row_key, date, qty, planned_qty?, actual_qty?, notes? } */
 router.put('/daily', async (req, res, next) => {
   const body = { ...req.body };
   if (body.row_key != null) body.order_id = body.row_key;
   if (body.qty != null) body.planned_qty = body.qty;
   try {
     if (req.user?.role === 'operator') return res.status(403).json({ error: 'Оператор не может редактировать план' });
-    let { order_id, workshop_id, date, floor_id, planned_qty, notes } = body;
+    let { order_id, workshop_id, date, floor_id, planned_qty, actual_qty, notes } = body;
     if (order_id && !workshop_id) {
       const ord = await db.Order.findByPk(order_id);
       if (ord) workshop_id = ord.workshop_id;
@@ -356,12 +359,13 @@ router.put('/daily', async (req, res, next) => {
     const dateStr = String(date).slice(0, 10);
     const period = await requireActivePeriodForDate(db, dateStr);
     const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
+    const actual = Math.max(0, parseInt(actual_qty, 10) || 0);
     const notesVal = typeof notes === 'string' ? notes.trim() || null : null;
     const [row, created] = await db.ProductionPlanDay.findOrCreate({
       where: { period_id: period.id, order_id: Number(order_id), date: dateStr, workshop_id: Number(workshop_id), floor_id: effectiveFloorId },
-      defaults: { planned_qty: planned, actual_qty: 0, notes: notesVal },
+      defaults: { planned_qty: planned, actual_qty: actual, notes: notesVal },
     });
-    if (!created) await row.update({ planned_qty: planned, notes: notesVal });
+    if (!created) await row.update({ planned_qty: planned, actual_qty: actual, notes: notesVal });
     await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), [dateStr], period.id);
     await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id);
     res.json(row);

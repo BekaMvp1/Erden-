@@ -159,6 +159,72 @@ async function getBoardOrders(req, res, next) {
       order: [['created_at', 'DESC']],
     });
 
+    const orderIds = orders.map((o) => o.id);
+    // Индикаторы этапов производства для панели: Закуп, Раскрой, Пошив, ОТК, Склад, Отгрузка
+    const cuttingByOrder = {};
+    const sewingByOrder = {};
+    const qcByOrder = {};
+    const warehouseByOrder = {};
+    const shippingByOrder = {};
+    if (orderIds.length > 0) {
+      const cuttingTasks = await db.CuttingTask.findAll({
+        where: { order_id: orderIds },
+        attributes: ['order_id', 'status'],
+        raw: true,
+      });
+      cuttingTasks.forEach((t) => {
+        if (!cuttingByOrder[t.order_id]) cuttingByOrder[t.order_id] = { hasAny: false, allDone: true };
+        cuttingByOrder[t.order_id].hasAny = true;
+        if (String(t.status || '') !== 'Готово') cuttingByOrder[t.order_id].allDone = false;
+      });
+      const sewingFloors = await db.SewingOrderFloor.findAll({
+        where: { order_id: orderIds },
+        attributes: ['order_id', 'status'],
+        raw: true,
+      });
+      sewingFloors.forEach((r) => {
+        if (!sewingByOrder[r.order_id]) sewingByOrder[r.order_id] = 'NOT_STARTED';
+        if (r.status === 'DONE') sewingByOrder[r.order_id] = 'DONE';
+        else if (r.status === 'IN_PROGRESS' && sewingByOrder[r.order_id] !== 'DONE') sewingByOrder[r.order_id] = 'IN_PROGRESS';
+      });
+      const doneBatches = await db.SewingBatch.findAll({
+        where: { order_id: orderIds, status: 'DONE' },
+        attributes: ['id', 'order_id'],
+        raw: true,
+      });
+      const batchIds = doneBatches.map((b) => b.id);
+      const orderHasDoneBatch = new Set(doneBatches.map((b) => b.order_id));
+      if (batchIds.length > 0) {
+        const qcBatches = await db.QcBatch.findAll({
+          where: { batch_id: batchIds },
+          attributes: ['batch_id'],
+          raw: true,
+        });
+        const batchHasQc = new Set(qcBatches.map((q) => q.batch_id));
+        doneBatches.forEach((b) => {
+          if (!qcByOrder[b.order_id]) qcByOrder[b.order_id] = { hasQc: false, hasDoneBatch: false };
+          qcByOrder[b.order_id].hasDoneBatch = true;
+          if (batchHasQc.has(b.id)) qcByOrder[b.order_id].hasQc = true;
+        });
+      }
+      const whRows = await db.WarehouseStock.findAll({
+        where: { order_id: orderIds },
+        attributes: ['order_id'],
+        raw: true,
+      });
+      whRows.forEach((r) => { warehouseByOrder[r.order_id] = true; });
+      const shipments = await db.Shipment.findAll({
+        where: { order_id: orderIds },
+        attributes: ['order_id', 'status'],
+        raw: true,
+      });
+      shipments.forEach((s) => {
+        if (!shippingByOrder[s.order_id]) shippingByOrder[s.order_id] = false;
+        const st = String(s.status || '').toLowerCase();
+        if (st === 'done' || st === 'shipped' || st === 'completed') shippingByOrder[s.order_id] = true;
+      });
+    }
+
     const prepared = [];
     for (const orderRow of orders) {
       const plain = orderRow.get ? orderRow.get({ plain: true }) : orderRow;
@@ -244,6 +310,34 @@ async function getBoardOrders(req, res, next) {
       const shippingStage = preStages.find((s) => s.stage_key === 'shipping');
       const forecastDate = toDateOnly(shippingStage?.planned_end_date) || null;
 
+      // Индикаторы этапов для линии под названием заказа (Закуп → Раскрой → Пошив → ОТК → Склад → Отгрузка)
+      let procurementStatus = 'NOT_STARTED';
+      if (pr) {
+        const prStatus = String(pr.status || '').toLowerCase();
+        if (prStatus === 'received') procurementStatus = 'DONE';
+        else if (prStatus === 'sent' || prStatus === 'draft') procurementStatus = 'IN_PROGRESS';
+      }
+      const cuttingStat = cuttingByOrder[plain.id];
+      const cuttingStatus = !cuttingStat ? 'NOT_STARTED' : cuttingStat.allDone ? 'DONE' : cuttingStat.hasAny ? 'IN_PROGRESS' : 'NOT_STARTED';
+      const sewingStatus = sewingByOrder[plain.id] || 'NOT_STARTED';
+      let qcStatus = 'NOT_STARTED';
+      const qcStat = qcByOrder[plain.id];
+      if (qcStat) {
+        if (qcStat.hasQc) qcStatus = 'DONE';
+        else if (qcStat.hasDoneBatch) qcStatus = 'IN_PROGRESS';
+      }
+      const warehouseStatus = warehouseByOrder[plain.id] ? 'DONE' : 'NOT_STARTED';
+      const shippingStatus = shippingByOrder[plain.id] ? 'DONE' : 'NOT_STARTED';
+
+      const production_stages = [
+        { key: 'procurement', label: 'Закуп', status: procurementStatus },
+        { key: 'cutting', label: 'Раскрой', status: cuttingStatus },
+        { key: 'sewing', label: 'Пошив', status: sewingStatus },
+        { key: 'qc', label: 'ОТК', status: qcStatus },
+        { key: 'warehouse', label: 'Склад', status: warehouseStatus },
+        { key: 'shipping', label: 'Отгрузка', status: shippingStatus },
+      ];
+
       prepared.push({
         id: plain.id,
         order_number: String(plain.id),
@@ -257,6 +351,7 @@ async function getBoardOrders(req, res, next) {
         is_overdue: isOverdue,
         stages: stagesOut,
         done_percent_total: donePercentTotal,
+        production_stages,
         _done: done,
       });
     }

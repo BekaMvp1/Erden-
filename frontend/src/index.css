@@ -18,16 +18,17 @@
     --text: #edeef0;
     --muted: #a7adb6;
     --border: rgba(255, 255, 255, 0.06);
-    --accent: #c7ff1a;
-    --accent2: #9bef00;
+    /* Приглушённый лайм: лучше читаемость текста на кнопках */
+    --accent: #8bc734;
+    --accent2: #6baf00;
     --danger: #ff4d4d;
     --warn: #ffcc00;
     --success: #4dff88;
 
-    --color-primary-400: #d6ff63;
-    --color-primary-500: #c7ff1a;
-    --color-primary-600: #9bef00;
-    --color-primary-700: #7ec700;
+    --color-primary-400: #9ed94d;
+    --color-primary-500: #8bc734;
+    --color-primary-600: #6baf00;
+    --color-primary-700: #5a9500;
     --accent-1: #101114;
     --accent-2: #14161a;
     --accent-3: #101114;
@@ -143,7 +144,7 @@ html.dark .sidebar-header-border {
 }
 .input-neon:focus {
   outline: none;
-  box-shadow: 0 0 0 1px rgba(199, 255, 26, 0.25), 0 0 25px rgba(199, 255, 26, 0.12);
+  box-shadow: 0 0 0 1px rgba(107, 175, 0, 0.35), 0 0 20px rgba(107, 175, 0, 0.12);
 }
 
 /* Единый вид input/select/textarea на Mac и Windows — как на Windows */
@@ -173,11 +174,11 @@ textarea {
   border-style: solid;
 }
 
-/* Единая аккуратная палитра статусов для всех страниц */
+/* Единая палитра статусов: приглушённый зелёный для читаемости */
 html {
-  --status-success-text: #d6ff63;
-  --status-success-bg: rgba(199, 255, 26, 0.16);
-  --status-success-border: rgba(199, 255, 26, 0.35);
+  --status-success-text: #9ed94d;
+  --status-success-bg: rgba(107, 175, 0, 0.18);
+  --status-success-border: rgba(107, 175, 0, 0.4);
   /* Без жёлтого: нейтральный серый */
   --status-warn-text: #a0aec0;
   --status-warn-bg: rgba(160, 174, 192, 0.16);

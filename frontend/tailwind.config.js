@@ -25,7 +25,7 @@ export default {
       boxShadow: {
         outer: '0 18px 60px rgba(0,0,0,.55)',
         soft: 'inset 0 1px 0 rgba(255,255,255,.04), inset 0 -20px 60px rgba(0,0,0,.6)',
-        neon: '0 0 0 1px rgba(199,255,26,.25), 0 0 25px rgba(199,255,26,.12)',
+        neon: '0 0 0 1px rgba(107,175,0,.3), 0 0 20px rgba(107,175,0,.1)',
       },
       keyframes: {
         fadeIn: {

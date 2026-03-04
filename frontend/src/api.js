@@ -47,6 +47,7 @@ async function request(path, options = {}) {
 export const api = {
   dashboard: {
     summary: () => request('/api/dashboard/summary'),
+    get: () => request('/api/dashboard'),
   },
   auth: {
     login: (email, password) =>
@@ -91,6 +92,12 @@ export const api = {
       }),
     deleteProcurement: (id) =>
       request(`/api/orders/${id}/procurement`, { method: 'DELETE' }),
+    getRostovka: (id) => request(`/api/orders/${id}/rostovka`),
+    saveRostovka: (id, data) =>
+      request(`/api/orders/${id}/rostovka`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
   },
   planning: {
     updateOperation: (id, data) =>
@@ -181,9 +188,45 @@ export const api = {
   },
   board: {
     getOrders: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
+      const cleaned = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null) continue;
+        if (k === 'q' && String(v).trim() === '') continue;
+        cleaned[k] = v;
+      }
+      const q = new URLSearchParams(cleaned).toString();
       return request(`/api/board/orders${q ? `?${q}` : ''}`);
     },
+  },
+  sewing: {
+    tasks: (params = {}) => {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null) continue;
+        if (k === 'q' && String(v).trim() === '') continue;
+        cleaned[k] = v;
+      }
+      const q = new URLSearchParams(cleaned).toString();
+      return request(`/api/sewing/tasks${q ? `?${q}` : ''}`);
+    },
+    board: (params = {}) => {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null) continue;
+        if (k === 'q' && String(v).trim() === '') continue;
+        cleaned[k] = v;
+      }
+      const status = cleaned.status === 'in_progress' ? 'IN_PROGRESS' : cleaned.status === 'done' ? 'DONE' : (cleaned.status === 'all' ? 'ALL' : 'IN_PROGRESS');
+      cleaned.status = status;
+      const qs = new URLSearchParams(cleaned).toString();
+      return request(`/api/sewing/board${qs ? `?${qs}` : ''}`);
+    },
+    completeStatus: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/sewing/complete-status${q ? `?${q}` : ''}`);
+    },
+    complete: (body) =>
+      request('/api/sewing/complete', { method: 'POST', body: JSON.stringify(body) }),
   },
   reports: {
     daily: (date) => request(`/api/reports/daily?date=${date}`),
@@ -306,7 +349,10 @@ export const api = {
   // Склад по размерам/партиям (ОТК → склад → отгрузка), без ручного ввода
   warehouseStock: {
     // ОТК по партиям
-    batchesPendingQc: () => request('/api/warehouse-stock/batches/pending-qc'),
+    batchesPendingQc: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request(`/api/warehouse-stock/batches/pending-qc${qs ? `?${qs}` : ''}`);
+    },
     batchById: (id) => request(`/api/warehouse-stock/batches/${id}`),
     postQcBatch: (data) =>
       request('/api/warehouse-stock/qc/batch', {

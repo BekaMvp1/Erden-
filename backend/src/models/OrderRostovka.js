@@ -1,39 +1,37 @@
 /**
- * Позиция отгрузки: размер и количество. Отгрузка привязана к партии (shipments.batch_id).
+ * Ростовка заказа: плановое количество по каждому размеру (size_id).
+ * SUM(planned_qty) должна равняться orders.quantity.
  */
 
 module.exports = (sequelize, DataTypes) => {
-  const ShipmentItem = sequelize.define(
-    'ShipmentItem',
+  const OrderRostovka = sequelize.define(
+    'OrderRostovka',
     {
       id: {
         type: DataTypes.INTEGER,
         primaryKey: true,
         autoIncrement: true,
       },
-      shipment_id: {
+      order_id: {
         type: DataTypes.INTEGER,
         allowNull: false,
       },
-      model_size_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-      },
       size_id: {
         type: DataTypes.INTEGER,
-        allowNull: true,
+        allowNull: false,
       },
-      qty: {
+      planned_qty: {
         type: DataTypes.DECIMAL(12, 3),
         allowNull: false,
         defaultValue: 0,
       },
     },
     {
-      tableName: 'shipment_items',
+      tableName: 'order_rostovka',
       timestamps: true,
       underscored: true,
+      indexes: [{ unique: true, fields: ['order_id', 'size_id'] }],
     }
   );
-  return ShipmentItem;
+  return OrderRostovka;
 };

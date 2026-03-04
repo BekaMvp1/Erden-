@@ -30,6 +30,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         comment: 'Партия пошива (новая схема: склад по партиям)',
       },
+      size_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: 'Учёт по размеру (ростовка)',
+      },
       qty: {
         type: DataTypes.INTEGER,
         allowNull: false,

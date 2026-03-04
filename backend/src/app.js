@@ -33,6 +33,7 @@ const aiRoutes = require("./routes/ai");
 const settingsRoutes = require("./routes/settings");
 const sizesRoutes = require("./routes/sizes");
 const boardRoutes = require("./routes/boardRoutes");
+const sewingRoutes = require("./routes/sewing");
 const analyticsRoutes = require("./modules/analytics/analytics.routes");
 const assistantRoutes = require("./modules/assistant/assistant.routes");
 const plannerRoutes = require("./modules/planner/planner.routes");
@@ -253,6 +254,13 @@ app.use(
   requireRole("admin", "manager", "technologist", "operator"),
   technologistFloorOnly,
   boardRoutes,
+);
+app.use(
+  "/api/sewing",
+  authenticate,
+  requireRole("admin", "manager", "technologist", "operator"),
+  technologistFloorOnly,
+  sewingRoutes,
 );
 app.use(
   "/api/analytics",

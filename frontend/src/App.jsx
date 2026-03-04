@@ -13,6 +13,7 @@ import Dashboard from "./pages/Dashboard";
 import CreateOrder from "./pages/CreateOrder";
 import OrderDetails from "./pages/OrderDetails";
 import Planning from "./pages/Planning";
+import Sewing from "./pages/Sewing";
 import Procurement from "./pages/Procurement";
 import Cutting from "./pages/Cutting";
 import Warehouse from "./pages/Warehouse";
@@ -25,6 +26,7 @@ import Settings from "./pages/Settings";
 import Dispatcher from "./pages/Dispatcher";
 import Assistant from "./pages/Assistant";
 import OrdersBoard from "./pages/OrdersBoard";
+import ProductionDashboard from "./pages/ProductionDashboard";
 
 export default function App() {
   return (
@@ -42,11 +44,17 @@ export default function App() {
                   </ProtectedRoute>
                 }
               >
-                <Route index element={<Dashboard />} />
+                {/* Главная после логина — Панель заказов */}
+                <Route index element={<Navigate to="/board" replace />} />
                 <Route path="board" element={<OrdersBoard />} />
+                <Route path="orders" element={<Dashboard />} />
+                <Route path="production-dashboard" element={<ProductionDashboard />} />
                 <Route path="orders/create" element={<CreateOrder />} />
                 <Route path="orders/:id" element={<OrderDetails />} />
+                {/* Планирование убрано из меню; роут оставлен для глубоких ссылок из отчётов/карточки заказа */}
                 <Route path="planning" element={<Planning />} />
+                <Route path="sewing" element={<Sewing />} />
+                <Route path="floor-tasks" element={<Navigate to="/sewing" replace />} />
                 <Route path="procurement" element={<Procurement />} />
                 <Route path="cutting" element={<Cutting />} />
                 <Route path="cutting/:type" element={<Cutting />} />

@@ -97,6 +97,16 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: [],
     },
+    order_height_type: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      defaultValue: 'PRESET',
+    },
+    order_height_value: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 170,
+    },
   }, {
     tableName: 'orders',
     timestamps: true,

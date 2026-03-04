@@ -17,7 +17,11 @@ module.exports = (sequelize, DataTypes) => {
       },
       model_size_id: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
+      },
+      size_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
       },
       checked_qty: {
         type: DataTypes.DECIMAL(12, 3),

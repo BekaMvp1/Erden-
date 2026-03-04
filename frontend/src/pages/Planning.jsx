@@ -398,6 +398,14 @@ export default function Planning() {
 
   const handleCalcCapacity = async () => {
     if (!canLoadTable) return;
+    // Для «Наш цех» (4 этажа) этаж обязателен — иначе бэкенд вернёт ошибку
+    if (selectedWorkshop?.floors_count === 4) {
+      const fid = Number(floorId);
+      if (!floorId || fid < 1 || fid > 4) {
+        setErrorMsg('Выберите этаж (1–4) в блоке «4. Этаж»');
+        return;
+      }
+    }
     setCalcLoading(true);
     setErrorMsg('');
     setCalcResult(null);
@@ -408,7 +416,9 @@ export default function Planning() {
         from,
         to,
       };
-      if (selectedWorkshop?.floors_count > 1) {
+      if (selectedWorkshop?.floors_count === 4 && floorId) {
+        params.floor_id = Number(floorId);
+      } else if (selectedWorkshop?.floors_count > 1 && floorId) {
         params.floor_id = Number(floorId);
       }
       const cap = parseInt(capacityWeek, 10);
@@ -1181,13 +1191,13 @@ export default function Planning() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-[#ECECEC]/90 mb-1">Факт</label>
+                <label className="block text-sm text-[#ECECEC]/90 mb-1">Факт (только просмотр; ввод — в Задачах по этажам)</label>
                 <input
                   type="number"
                   min="0"
                   value={editModal.actual_qty}
-                  onChange={(e) => setEditModal({ ...editModal, actual_qty: parseInt(e.target.value, 10) || 0 })}
-                  className="w-full px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
+                  readOnly
+                  className="w-full px-4 py-2 rounded-lg bg-accent-2/50 dark:bg-dark-800/50 border border-white/20 text-[#ECECEC]/80 dark:text-dark-text/80 cursor-not-allowed"
                 />
               </div>
             </div>

@@ -61,14 +61,27 @@ async function hasOverlappingFloorTask(db, floor, excludeTaskId, startDate, endD
   return rows.length > 0;
 }
 
+/** Валидация роста: PRESET — 165 или 170, CUSTOM — 120–220 */
+function parseHeight(body) {
+  const type = body.height_type === 'CUSTOM' ? 'CUSTOM' : 'PRESET';
+  let value = parseInt(body.height_value, 10);
+  if (type === 'PRESET') {
+    if (value !== 165 && value !== 170) value = 170;
+  } else {
+    if (Number.isNaN(value) || value < 120 || value > 220) value = 170;
+  }
+  return { height_type: type, height_value: value };
+}
+
 /**
  * POST /api/cutting/tasks
  * Добавить задачу на раскрой
- * body: { order_id, cutting_type, floor, operation?, status?, responsible?, start_date?, end_date? }
+ * body: { order_id, cutting_type, floor, operation?, status?, responsible?, start_date?, end_date?, height_type?, height_value? }
  */
 router.post('/tasks', async (req, res, next) => {
   try {
     const { order_id, cutting_type, floor, operation, status, responsible, start_date, end_date } = req.body;
+    const height = parseHeight(req.body);
 
     if (!order_id) return res.status(400).json({ error: 'Укажите order_id' });
     if (!cutting_type || String(cutting_type).trim() === '') {
@@ -107,6 +120,8 @@ router.post('/tasks', async (req, res, next) => {
       responsible: responsible ? String(responsible).trim() : null,
       start_date: start_date || null,
       end_date: end_date || null,
+      height_type: height.height_type,
+      height_value: height.height_value,
     });
 
     await logAudit(req.user.id, 'CREATE', 'cutting_task', task.id);
@@ -127,6 +142,7 @@ router.put('/tasks/:id', async (req, res, next) => {
   try {
     const taskId = req.params.id;
     const { operation, status, responsible, actual_variants, floor, start_date, end_date } = req.body;
+    const height = parseHeight(req.body);
 
     const task = await db.CuttingTask.findByPk(taskId, {
       include: [{ model: db.Order, as: 'Order' }],
@@ -159,6 +175,10 @@ router.put('/tasks/:id', async (req, res, next) => {
     }
     if (start_date !== undefined) updates.start_date = start_date || null;
     if (end_date !== undefined) updates.end_date = end_date || null;
+    if (req.body.height_type !== undefined || req.body.height_value !== undefined) {
+      updates.height_type = height.height_type;
+      updates.height_value = height.height_value;
+    }
 
     // При смене этажа или дат — проверка пересечений (если задача не завершена и есть даты)
     const newFloor = updates.floor ?? task.floor;

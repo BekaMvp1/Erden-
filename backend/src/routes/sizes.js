@@ -1,7 +1,7 @@
 /**
- * Роуты справочника размеров
- * GET /api/sizes — список доступных размеров
- * POST /api/sizes — добавить размер (admin/manager или при создании заказа)
+ * Роуты справочника размеров (ростовка: code 40–56, S–5XL, type NUMERIC/ALPHA).
+ * GET /api/sizes — список с code, type, sort_order для ростовки.
+ * POST /api/sizes — добавить размер (admin/manager или при создании заказа).
  */
 
 const express = require('express');
@@ -13,8 +13,12 @@ router.get('/', async (req, res, next) => {
   try {
     const sizes = await db.Size.findAll({
       where: { is_active: true },
-      order: [['id']],
-      attributes: ['id', 'name'],
+      order: [
+        ['type', 'ASC'],
+        ['sort_order', 'ASC'],
+        ['id', 'ASC'],
+      ],
+      attributes: ['id', 'name', 'code', 'type', 'sort_order'],
     });
     res.json(sizes);
   } catch (err) {

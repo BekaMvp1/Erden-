@@ -217,9 +217,10 @@ router.put('/plans/:id/fact', async (req, res, next) => {
 });
 
 /**
- * POST /api/sewing-plans/batches/finish — завершить партию пошива (создать партию DONE из факта пошива).
+ * POST /api/sewing-plans/batches/finish — внутренний/резервный endpoint: создать партию DONE из факта пошива.
+ * В UI партия создаётся только при «Завершить пошив → ОТК» на странице Пошив (POST /api/sewing/complete).
  * body: { order_id, floor_id, date_from?, date_to? }
- * Агрегирует sewing_plans по order_id, floor_id и датам (если не указаны — все с fact_qty > 0), создаёт sewing_batches (DONE) и sewing_batch_items.
+ * Факт хранится по дням в sewing_plans. Агрегируем SUM(fact_qty); при сумме > 0 создаём партию и sewing_batch_items.
  */
 router.post('/batches/finish', async (req, res, next) => {
   try {
@@ -232,29 +233,37 @@ router.post('/batches/finish', async (req, res, next) => {
     const floor = await db.BuildingFloor.findByPk(floor_id);
     if (!floor) return res.status(404).json({ error: 'Этаж не найден' });
 
-    const where = { order_id: Number(order_id), floor_id: Number(floor_id) };
-    if (date_from && date_to) where.date = { [Op.between]: [String(date_from).slice(0, 10), String(date_to).slice(0, 10)] };
+    const replacements = {
+      order_id: Number(order_id),
+      floor_id: Number(floor_id),
+      ...(date_from && date_to ? { date_from: String(date_from).slice(0, 10), date_to: String(date_to).slice(0, 10) } : {}),
+    };
+    const dateClause = date_from && date_to ? 'AND date BETWEEN :date_from AND :date_to' : '';
 
-    const [rows] = await db.sequelize.query(
-      `SELECT model_size_id, SUM(planned_qty)::numeric AS planned_qty, SUM(fact_qty)::numeric AS fact_qty
+    // Проверка: есть ли факт хотя бы по одной записи (агрегат по всем датам)
+    const [[totalRow]] = await db.sequelize.query(
+      `SELECT COALESCE(SUM(fact_qty), 0)::numeric AS total
        FROM sewing_plans
-       WHERE order_id = :order_id AND floor_id = :floor_id
-       ${date_from && date_to ? 'AND date BETWEEN :date_from AND :date_to' : ''}
-       GROUP BY model_size_id
-       HAVING SUM(fact_qty) > 0`,
-      {
-        replacements: {
-          order_id: Number(order_id),
-          floor_id: Number(floor_id),
-          ...(date_from && date_to ? { date_from: String(date_from).slice(0, 10), date_to: String(date_to).slice(0, 10) } : {}),
-        },
-      }
+       WHERE order_id = :order_id AND floor_id = :floor_id ${dateClause}`,
+      { replacements }
     );
-    if (!rows || rows.length === 0) {
+    const totalFact = Number(totalRow?.total ?? 0) || 0;
+    if (totalFact <= 0) {
       return res.status(400).json({ error: 'Нет факта пошива по этому заказу и этажу (или по указанным датам)' });
     }
 
-    const batchCode = `B-${order_id}-${floor_id}-${Date.now().toString(36).toUpperCase()}`;
+    // Агрегат по размерам (по дням уже учтено в SUM)
+    const [rows] = await db.sequelize.query(
+      `SELECT model_size_id, SUM(planned_qty)::numeric AS planned_qty, SUM(fact_qty)::numeric AS fact_qty
+       FROM sewing_plans
+       WHERE order_id = :order_id AND floor_id = :floor_id ${dateClause}
+       GROUP BY model_size_id
+       HAVING SUM(fact_qty) > 0`,
+      { replacements }
+    );
+
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const batchCode = `AUTO-${order_id}-${floor_id}-${dateStr}`;
     const batch = await db.SewingBatch.create({
       order_id: Number(order_id),
       model_id: order.model_id || null,
@@ -264,12 +273,45 @@ router.post('/batches/finish', async (req, res, next) => {
       finished_at: new Date(),
       status: 'DONE',
     });
-    for (const r of rows) {
+
+    const sizeRows = Array.isArray(rows) ? rows : [];
+    if (sizeRows.length > 0) {
+      const modelSizeIds = [...new Set(sizeRows.map((r) => r.model_size_id))];
+      const modelSizes = await db.ModelSize.findAll({
+        where: { id: modelSizeIds },
+        attributes: ['id', 'size_id'],
+      });
+      const modelSizeToSize = {};
+      modelSizes.forEach((ms) => { modelSizeToSize[ms.id] = ms.size_id; });
+      for (const r of sizeRows) {
+        await db.SewingBatchItem.create({
+          batch_id: batch.id,
+          model_size_id: r.model_size_id,
+          size_id: modelSizeToSize[r.model_size_id] || null,
+          planned_qty: r.planned_qty || 0,
+          fact_qty: r.fact_qty || 0,
+        });
+      }
+    } else {
+      // Факт есть (totalFact > 0), но по размерам записей нет — одна позиция с суммарным фактом
+      let model_size_id = null;
+      if (order.model_id) {
+        const first = await db.ModelSize.findOne({
+          where: { model_id: order.model_id },
+          attributes: ['id'],
+        });
+        if (first) model_size_id = first.id;
+      }
+      if (model_size_id == null) {
+        const any = await db.ModelSize.findOne({ attributes: ['id'], order: [['id']] });
+        if (any) model_size_id = any.id;
+      }
       await db.SewingBatchItem.create({
         batch_id: batch.id,
-        model_size_id: r.model_size_id,
-        planned_qty: r.planned_qty || 0,
-        fact_qty: r.fact_qty || 0,
+        model_size_id,
+        size_id: null,
+        planned_qty: 0,
+        fact_qty: totalFact,
       });
     }
     const withAssoc = await db.SewingBatch.findByPk(batch.id, {

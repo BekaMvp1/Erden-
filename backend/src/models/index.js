@@ -72,9 +72,11 @@ const db = {
   WarehouseStock: require('./WarehouseStock')(sequelize, Sequelize.DataTypes),
   Shipment: require('./Shipment')(sequelize, Sequelize.DataTypes),
   OrderSizeMatrix: require('./OrderSizeMatrix')(sequelize, Sequelize.DataTypes),
+  OrderRostovka: require('./OrderRostovka')(sequelize, Sequelize.DataTypes),
   SewingPlan: require('./SewingPlan')(sequelize, Sequelize.DataTypes),
   SewingBatch: require('./SewingBatch')(sequelize, Sequelize.DataTypes),
   SewingBatchItem: require('./SewingBatchItem')(sequelize, Sequelize.DataTypes),
+  SewingOrderFloor: require('./SewingOrderFloor')(sequelize, Sequelize.DataTypes),
   QcBatch: require('./QcBatch')(sequelize, Sequelize.DataTypes),
   QcBatchItem: require('./QcBatchItem')(sequelize, Sequelize.DataTypes),
   ShipmentItem: require('./ShipmentItem')(sequelize, Sequelize.DataTypes),
@@ -242,6 +244,11 @@ db.OrderSizeMatrix.belongsTo(db.Order, { foreignKey: 'order_id' });
 db.ModelSize.hasMany(db.OrderSizeMatrix, { foreignKey: 'model_size_id' });
 db.OrderSizeMatrix.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
 
+db.Order.hasMany(db.OrderRostovka, { foreignKey: 'order_id' });
+db.OrderRostovka.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.Size.hasMany(db.OrderRostovka, { foreignKey: 'size_id' });
+db.OrderRostovka.belongsTo(db.Size, { foreignKey: 'size_id' });
+
 db.Order.hasMany(db.SewingPlan, { foreignKey: 'order_id' });
 db.SewingPlan.belongsTo(db.Order, { foreignKey: 'order_id' });
 db.BuildingFloor.hasMany(db.SewingPlan, { foreignKey: 'floor_id' });
@@ -260,9 +267,17 @@ db.SewingBatch.hasMany(db.SewingPlan, { foreignKey: 'batch_id' });
 db.SewingPlan.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
 
 db.SewingBatch.hasMany(db.SewingBatchItem, { foreignKey: 'batch_id' });
-db.SewingBatchItem.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+    db.SewingBatchItem.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+db.Order.hasMany(db.SewingOrderFloor, { foreignKey: 'order_id' });
+db.SewingOrderFloor.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.BuildingFloor.hasMany(db.SewingOrderFloor, { foreignKey: 'floor_id' });
+db.SewingOrderFloor.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+db.SewingBatch.hasOne(db.SewingOrderFloor, { foreignKey: 'done_batch_id' });
+db.SewingOrderFloor.belongsTo(db.SewingBatch, { foreignKey: 'done_batch_id' });
 db.ModelSize.hasMany(db.SewingBatchItem, { foreignKey: 'model_size_id' });
 db.SewingBatchItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+db.Size.hasMany(db.SewingBatchItem, { foreignKey: 'size_id' });
+db.SewingBatchItem.belongsTo(db.Size, { foreignKey: 'size_id' });
 
 db.SewingBatch.hasOne(db.QcBatch, { foreignKey: 'batch_id' });
 db.QcBatch.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
@@ -270,9 +285,13 @@ db.QcBatch.hasMany(db.QcBatchItem, { foreignKey: 'qc_batch_id' });
 db.QcBatchItem.belongsTo(db.QcBatch, { foreignKey: 'qc_batch_id' });
 db.ModelSize.hasMany(db.QcBatchItem, { foreignKey: 'model_size_id' });
 db.QcBatchItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+db.Size.hasMany(db.QcBatchItem, { foreignKey: 'size_id' });
+db.QcBatchItem.belongsTo(db.Size, { foreignKey: 'size_id' });
 
 db.SewingBatch.hasMany(db.WarehouseStock, { foreignKey: 'batch_id' });
 db.WarehouseStock.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
+db.Size.hasMany(db.WarehouseStock, { foreignKey: 'size_id' });
+db.WarehouseStock.belongsTo(db.Size, { foreignKey: 'size_id' });
 
 db.SewingBatch.hasMany(db.Shipment, { foreignKey: 'batch_id' });
 db.Shipment.belongsTo(db.SewingBatch, { foreignKey: 'batch_id' });
@@ -280,5 +299,7 @@ db.Shipment.hasMany(db.ShipmentItem, { foreignKey: 'shipment_id' });
 db.ShipmentItem.belongsTo(db.Shipment, { foreignKey: 'shipment_id' });
 db.ModelSize.hasMany(db.ShipmentItem, { foreignKey: 'model_size_id' });
 db.ShipmentItem.belongsTo(db.ModelSize, { foreignKey: 'model_size_id' });
+db.Size.hasMany(db.ShipmentItem, { foreignKey: 'size_id' });
+db.ShipmentItem.belongsTo(db.Size, { foreignKey: 'size_id' });
 
 module.exports = db;

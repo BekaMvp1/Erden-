@@ -49,6 +49,17 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       comment: '[{ color, size, quantity_planned, quantity_actual }]',
     },
+    // Рост: 165 / 170 или ручной (120–220)
+    height_type: {
+      type: DataTypes.ENUM('PRESET', 'CUSTOM'),
+      allowNull: true,
+      defaultValue: 'PRESET',
+    },
+    height_value: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 170,
+    },
   }, {
     tableName: 'cutting_tasks',
     timestamps: true,

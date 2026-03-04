@@ -144,10 +144,12 @@ router.post('/sewing', async (req, res, next) => {
 
 /**
  * GET /api/warehouse-stock/batches/pending-qc — партии, готовые к ОТК.
- * Условие: sewing_batches.status = 'DONE', по партии ещё нет qc_batches, есть факт (SUM fact_qty > 0).
+ * Условие: sewing_batches.status = 'DONE', по партии ещё нет qc_batches, total_fact > 0.
+ * Сортировка: finished_at DESC. Фильтры: q (поиск по заказу/модели/клиенту), floor_id (2, 3 или 4).
  */
 router.get('/batches/pending-qc', async (req, res, next) => {
   try {
+    const { q, floor_id } = req.query;
     const [rows] = await db.sequelize.query(`
       SELECT sb.id, sb.order_id, sb.model_id, sb.floor_id, sb.batch_code, sb.finished_at,
              COALESCE(SUM(sbi.fact_qty), 0)::numeric AS total_fact
@@ -160,7 +162,6 @@ router.get('/batches/pending-qc', async (req, res, next) => {
       ORDER BY sb.finished_at DESC NULLS LAST
     `);
     if (!rows || rows.length === 0) return res.json([]);
-    const batchIds = rows.map((r) => r.id);
     const orders = await db.Order.findAll({
       where: { id: [...new Set(rows.map((r) => r.order_id))] },
       include: [{ model: db.Client, as: 'Client' }],
@@ -174,7 +175,7 @@ router.get('/batches/pending-qc', async (req, res, next) => {
     });
     const floorMap = {};
     floors.forEach((f) => { floorMap[f.id] = f; });
-    const list = rows.map((r) => {
+    let list = rows.map((r) => {
       const order = orderMap[r.order_id];
       const floor = r.floor_id ? floorMap[r.floor_id] : null;
       return {
@@ -191,6 +192,21 @@ router.get('/batches/pending-qc', async (req, res, next) => {
         total_fact: Number(r.total_fact) || 0,
       };
     });
+    if (floor_id) {
+      const floorIds = String(floor_id).split(',').map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id));
+      if (floorIds.length) list = list.filter((i) => i.floor_id != null && floorIds.includes(i.floor_id));
+    }
+    if (q && String(q).trim()) {
+      const lower = String(q).trim().toLowerCase();
+      list = list.filter(
+        (i) =>
+          (i.order_title && i.order_title.toLowerCase().includes(lower)) ||
+          (i.model_name && i.model_name.toLowerCase().includes(lower)) ||
+          (i.client_name && i.client_name.toLowerCase().includes(lower)) ||
+          (i.tz_code && i.tz_code.toLowerCase().includes(lower)) ||
+          (i.batch_code && i.batch_code.toLowerCase().includes(lower))
+      );
+    }
     res.json(list);
   } catch (err) {
     next(err);

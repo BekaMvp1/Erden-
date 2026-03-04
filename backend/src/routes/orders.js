@@ -8,6 +8,7 @@ const db = require('../models');
 const { logAudit } = require('../utils/audit');
 const { trySyncOrderToCloud, queueOrderForSync } = require('../services/cloudSync');
 const { STAGES, DEFAULT_STAGE_DAYS } = require('../constants/boardStages');
+const { normalizeSizeCode, findSizeIdByCode } = require('../utils/sizeNormalize');
 
 const router = express.Router();
 
@@ -1225,6 +1226,17 @@ router.put('/:id', async (req, res, next) => {
       updates.status_id = parseInt(status_id, 10);
     }
 
+    const { order_height_type, order_height_value } = req.body;
+    if (order_height_type !== undefined || order_height_value !== undefined) {
+      const type = order_height_type === 'CUSTOM' ? 'CUSTOM' : 'PRESET';
+      let value = type === 'PRESET' ? 170 : (parseInt(order_height_value, 10) || 170);
+      if (type === 'PRESET' && (order_height_value === 165 || order_height_value === '165')) value = 165;
+      else if (type === 'PRESET') value = 170;
+      else value = Math.min(220, Math.max(120, value));
+      updates.order_height_type = type;
+      updates.order_height_value = value;
+    }
+
     let qty = null;
     let sizeIdsMap = {};
     let variantsToInsert = [];
@@ -1388,6 +1400,88 @@ router.delete('/:id', async (req, res, next) => {
 });
 
 /**
+ * GET /api/orders/:id/rostovka — ростовка заказа (размерная матрица по size_id).
+ * Права: admin/manager/technologist.
+ */
+router.get('/:id/rostovka', async (req, res, next) => {
+  try {
+    if (['operator'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const order = await db.Order.findByPk(req.params.id, { attributes: ['id', 'quantity'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    const rows = await db.OrderRostovka.findAll({
+      where: { order_id: order.id },
+      include: [{ model: db.Size, as: 'Size', attributes: ['id', 'name', 'code', 'type'] }],
+      order: [['Size', 'sort_order', 'ASC']],
+    });
+    const total = rows.reduce((s, r) => s + Number(r.planned_qty || 0), 0);
+    res.json({ items: rows, order_quantity: order.quantity, total });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/orders/:id/rostovka — сохранить ростовку. body: { items: [{ size_id или code, planned_qty }] }.
+ * Правило: SUM(planned_qty) должен равняться orders.quantity. Размеры только из справочника (code нормализуется).
+ */
+router.put('/:id/rostovka', async (req, res, next) => {
+  try {
+    if (['operator'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+    const order = await db.Order.findByPk(req.params.id, { attributes: ['id', 'quantity'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    const orderQty = Number(order.quantity) || 0;
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: 'Укажите items: массив { size_id или code, planned_qty }' });
+    }
+    const sizesList = await db.Size.findAll({ where: { is_active: true }, attributes: ['id', 'code', 'name'] });
+    const rawSizes = sizesList.map((s) => ({ id: s.id, code: (s.code || s.name || '').toString().trim().toUpperCase() }));
+
+    const toUpsert = [];
+    let sum = 0;
+    for (const it of items) {
+      let sizeId = it.size_id != null ? Number(it.size_id) : null;
+      if (!sizeId && it.code != null) {
+        const code = normalizeSizeCode(String(it.code));
+        sizeId = findSizeIdByCode(code, sizesList);
+      }
+      if (!sizeId) continue;
+      const qty = Math.max(0, parseFloat(it.planned_qty) || 0);
+      if (qty <= 0) continue;
+      toUpsert.push({ size_id: sizeId, planned_qty: qty });
+      sum += qty;
+    }
+    if (Math.abs(sum - orderQty) > 0.001) {
+      return res.status(400).json({
+        error: `Сумма по размерам (${sum}) должна равняться количеству заказа (${orderQty})`,
+        total: sum,
+        order_quantity: orderQty,
+      });
+    }
+    await db.OrderRostovka.destroy({ where: { order_id: order.id } });
+    for (const it of toUpsert) {
+      await db.OrderRostovka.create({
+        order_id: order.id,
+        size_id: it.size_id,
+        planned_qty: it.planned_qty,
+      });
+    }
+    const rows = await db.OrderRostovka.findAll({
+      where: { order_id: order.id },
+      include: [{ model: db.Size, as: 'Size', attributes: ['id', 'name', 'code', 'type'] }],
+      order: [['Size', 'sort_order', 'ASC']],
+    });
+    res.json({ items: rows, order_quantity: orderQty, total: sum });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/orders/:id
  * Детали заказа (включая variants, sizes, colors)
  */
@@ -1415,6 +1509,12 @@ router.get('/:id', async (req, res, next) => {
           model: db.OrderVariant,
           as: 'OrderVariants',
           include: [{ model: db.Size, as: 'Size' }],
+        },
+        {
+          model: db.OrderRostovka,
+          as: 'OrderRostovkas',
+          include: [{ model: db.Size, as: 'Size', attributes: ['id', 'name', 'code', 'type', 'sort_order'] }],
+          required: false,
         },
         {
           model: db.CuttingTask,

@@ -18,6 +18,11 @@ const ROLE_LABELS = {
 };
 
 const NAV_ICONS = {
+  dashboard: (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  ),
   board: (
     <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18M6 7v10m6-10v10m6-10v10" />
@@ -117,11 +122,14 @@ export default function Layout() {
 
   // Заголовок для печати по текущему маршруту
   const printTitles = {
-    '/': 'Заказы',
+    '/': 'Панель заказов',
+    '/orders': 'Заказы',
+    '/production-dashboard': 'Дашборд',
     '/board': 'Панель заказов',
     '/orders/create': 'Создать заказ',
     '/procurement': 'Закуп',
     '/planning': 'Планирование',
+    '/sewing': 'Пошив',
     '/reports': 'Отчёты',
     '/finance': 'Финансы',
     '/warehouse': 'Склад',
@@ -130,7 +138,6 @@ export default function Layout() {
     '/cutting': 'Раскрой',
     '/references': 'Справочники',
     '/settings': 'Настройки',
-    '/dispatcher': 'Планировщик',
     '/assistant': 'ИИ Ассистент',
   };
   const basePath = location.pathname.replace(/\/$/, '') || '/';
@@ -171,22 +178,49 @@ export default function Layout() {
     }
   }, [shouldShowSummary]);
 
-  const navItems = [
-    { to: '/board', label: 'Панель заказов', icon: 'board' },
-    { to: '/', label: 'Заказы', icon: 'orders', end: true },
-    ...(user?.role !== 'operator' ? [{ to: '/orders/create', label: 'Создать заказ', icon: 'create' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/procurement', label: 'Закуп', icon: 'procurement' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/warehouse', label: 'Склад', icon: 'warehouse' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/qc', label: 'ОТК', icon: 'qc' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/shipments', label: 'Отгрузка', icon: 'shipments' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/planning', label: 'Планирование', icon: 'planning', end: true }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/reports', label: 'Отчёты', icon: 'reports' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/dispatcher', label: 'Планировщик', icon: 'dispatcher' }] : []),
-    ...(user?.role !== 'operator' ? [{ to: '/finance', label: 'Финансы', icon: 'finance' }] : []),
-    { to: '/assistant', label: 'ИИ Ассистент', icon: 'assistant' },
-    { to: '/references', label: 'Справочники', icon: 'references' },
-    { to: '/settings', label: 'Настройки', icon: 'settings' },
+  // Структура sidebar: Дашборд сверху, блок заказов, разделитель, производственный блок, разделитель, системный блок
+  const dashboardItem = { type: 'item', to: '/production-dashboard', label: 'Дашборд', icon: 'dashboard' };
+  const orderBlockItems =
+    user?.role === 'operator'
+      ? [
+          { type: 'item', to: '/board', label: 'Панель заказов', icon: 'board' },
+          { type: 'item', to: '/orders', label: 'Заказы', icon: 'orders', end: true },
+        ]
+      : [
+          { type: 'item', to: '/board', label: 'Панель заказов', icon: 'board' },
+          { type: 'item', to: '/orders', label: 'Заказы', icon: 'orders', end: true },
+          { type: 'item', to: '/orders/create', label: 'Создать заказ', icon: 'create' },
+          { type: 'item', to: '/planning', label: 'Планирование', icon: 'planning', end: true },
+        ];
+  const productionBlockItems =
+    user?.role === 'operator'
+      ? []
+      : [
+          { type: 'item', to: '/procurement', label: 'Закуп', icon: 'procurement' },
+          { type: 'item', to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems },
+          { type: 'item', to: '/sewing', label: 'Пошив', icon: 'floorTasks' },
+          { type: 'item', to: '/qc', label: 'ОТК', icon: 'qc' },
+          { type: 'item', to: '/warehouse', label: 'Склад', icon: 'warehouse' },
+          { type: 'item', to: '/shipments', label: 'Отгрузка', icon: 'shipments' },
+        ];
+  const systemBlockItems = [
+    ...(user?.role !== 'operator' ? [{ type: 'item', to: '/reports', label: 'Отчёты', icon: 'reports' }] : []),
+    ...(user?.role !== 'operator' ? [{ type: 'item', to: '/finance', label: 'Финансы', icon: 'finance' }] : []),
+    { type: 'item', to: '/assistant', label: 'ИИ Ассистент', icon: 'assistant' },
+    { type: 'item', to: '/references', label: 'Справочники', icon: 'references' },
+    { type: 'item', to: '/settings', label: 'Настройки', icon: 'settings' },
+  ];
+
+  const navStructure = [
+    dashboardItem,
+    { type: 'divider' },
+    ...orderBlockItems,
+    { type: 'divider' },
+    { type: 'spacer' }, // отступ сверху производственного блока
+    ...productionBlockItems,
+    { type: 'spacer' }, // отступ снизу производственного блока
+    { type: 'divider' },
+    ...systemBlockItems,
   ];
 
   return (
@@ -214,8 +248,15 @@ export default function Layout() {
           </h1>
         </div>
         <nav className="flex-1 p-2 space-y-1 overflow-x-hidden">
-          {navItems.map(({ to, label, icon, end, dropdown }) =>
-            dropdown ? (
+          {navStructure.map((entry, idx) => {
+            if (entry.type === 'divider') {
+              return <div key={`divider-${idx}`} className="border-t border-white/10 my-2" aria-hidden="true" />;
+            }
+            if (entry.type === 'spacer') {
+              return <div key={`spacer-${idx}`} className="py-2" aria-hidden="true" />;
+            }
+            const { to, label, icon, end, dropdown } = entry;
+            return dropdown ? (
               <div key={to} className="relative">
                 <button
                   onClick={() => setCuttingOpen(!cuttingOpen)}
@@ -269,8 +310,8 @@ export default function Layout() {
                 <span className="flex-shrink-0">{NAV_ICONS[icon]}</span>
                 <span className="hidden md:group-hover/sidebar:inline truncate whitespace-nowrap">{label}</span>
               </NavLink>
-            )
-          )}
+            );
+          })}
         </nav>
       </aside>
 

@@ -164,6 +164,8 @@ export default function Cutting() {
     status: 'Ожидает',
     responsible: '',
     start_date: '',
+    height_type: 'PRESET',
+    height_value: 170,
   });
 
   // Аксы и Аутсорс — по умолчанию; остальные — из справочника (без дублей)
@@ -191,6 +193,19 @@ export default function Cutting() {
     api.orders.list({ limit: 200 }).then(setOrders).catch(() => setOrders([]));
   }, []);
 
+  // При выборе заказа подставляем рост из заказа (для раскроя)
+  useEffect(() => {
+    if (!newTask.order_id) return;
+    api.orders
+      .get(newTask.order_id)
+      .then((o) => {
+        const type = o.order_height_type === 'CUSTOM' ? 'CUSTOM' : 'PRESET';
+        const value = o.order_height_value ?? 170;
+        setNewTask((prev) => ({ ...prev, height_type: type, height_value: value }));
+      })
+      .catch(() => {});
+  }, [newTask.order_id]);
+
   useEffect(() => {
     if (type && allTypes.includes(type)) {
       setActiveType(type);
@@ -210,6 +225,7 @@ export default function Cutting() {
       return;
     }
     try {
+      const heightVal = newTask.height_type === 'CUSTOM' ? Math.min(220, Math.max(120, parseInt(newTask.height_value, 10) || 170)) : (newTask.height_value === 165 ? 165 : 170);
       await api.cutting.addTask({
         order_id: parseInt(newTask.order_id, 10),
         cutting_type: activeType,
@@ -218,8 +234,10 @@ export default function Cutting() {
         status: newTask.status,
         responsible: newTask.responsible?.trim() || undefined,
         start_date: newTask.start_date || undefined,
+        height_type: newTask.height_type,
+        height_value: heightVal,
       });
-      setNewTask({ order_id: '', floor: '', operation: '', status: 'Ожидает', responsible: '', start_date: '' });
+      setNewTask({ order_id: '', floor: '', operation: '', status: 'Ожидает', responsible: '', start_date: '', height_type: 'PRESET', height_value: 170 });
       setShowAddForm(false);
       const updated = await api.cutting.tasks(activeType);
       setTasks(updated);
@@ -348,6 +366,33 @@ export default function Cutting() {
             </select>
           </div>
           <div>
+            <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Рост</label>
+            <select
+              value={newTask.height_type === 'CUSTOM' ? 'CUSTOM' : String(newTask.height_value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'CUSTOM') setNewTask({ ...newTask, height_type: 'CUSTOM', height_value: 170 });
+                else setNewTask({ ...newTask, height_type: 'PRESET', height_value: v === '165' ? 165 : 170 });
+              }}
+              className="px-3 sm:px-4 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+            >
+              <option value="170">170</option>
+              <option value="165">165</option>
+              <option value="CUSTOM">Другое (ручной ввод)</option>
+            </select>
+            {newTask.height_type === 'CUSTOM' && (
+              <input
+                type="number"
+                min={120}
+                max={220}
+                value={newTask.height_value}
+                onChange={(e) => setNewTask({ ...newTask, height_value: e.target.value })}
+                className="mt-1 w-24 px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC]"
+                placeholder="120–220"
+              />
+            )}
+          </div>
+          <div>
             <label className="block text-sm text-[#ECECEC]/80 dark:text-dark-text/80 mb-1">Начало раскроя</label>
             <input
               type="date"
@@ -411,6 +456,7 @@ export default function Cutting() {
               <tr className="bg-accent-3/80 dark:bg-dark-900 border-b border-white/25 dark:border-white/25">
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Заказ</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Этаж</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Рост</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Операция</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Статус</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Ответственный</th>
@@ -485,6 +531,9 @@ export default function Cutting() {
                           ))}
                         </select>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">
+                      {task.height_value != null ? String(task.height_value) : '—'}
                     </td>
                     <td className="px-4 py-3 text-[#ECECEC]/90 dark:text-dark-text/80 align-top">{task.operation || '—'}</td>
                     <td className="px-4 py-3 align-top">

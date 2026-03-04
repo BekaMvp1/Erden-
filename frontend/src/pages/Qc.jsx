@@ -1,74 +1,77 @@
 /**
- * Страница ОТК (контроль качества) — вариант 2: проверка КАЖДОЙ партии пошива отдельно.
- * Показываются только партии со статусом DONE, по которым ещё не проведён ОТК.
- * После сохранения ОТК партия автоматически поступает на склад по размерам.
+ * Страница ОТК (контроль качества): проверка партий пошива.
+ * Партии создаются только при завершении пошива на странице «Пошив».
+ * Показываются партии со статусом DONE без проведённого ОТК; после сохранения ОТК продукция поступает на склад.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '../api';
 import PrintButton from '../components/PrintButton';
 import { NeonButton, NeonCard, NeonInput } from '../components/ui';
 
+const SEWING_FLOOR_IDS = [2, 3, 4]; // этажи пошива для фильтра
+
 export default function Qc() {
+  const [searchParams] = useSearchParams();
+  const batchIdParam = searchParams.get('batch_id') ? Number(searchParams.get('batch_id')) : null;
+  const orderIdParam = searchParams.get('order_id') ? Number(searchParams.get('order_id')) : null;
+  const floorIdParam = searchParams.get('floor_id') ? Number(searchParams.get('floor_id')) : null;
+
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalBatch, setModalBatch] = useState(null);
   const [formItems, setFormItems] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createOrderId, setCreateOrderId] = useState('');
-  const [createFloorId, setCreateFloorId] = useState('');
-  const [createError, setCreateError] = useState('');
-  const [createLoading, setCreateLoading] = useState(false);
-  const [orders, setOrders] = useState([]);
-  const [floors, setFloors] = useState([]);
+  const [searchQ, setSearchQ] = useState('');
+  const [filterFloorId, setFilterFloorId] = useState(() =>
+    floorIdParam != null && SEWING_FLOOR_IDS.includes(Number(floorIdParam)) ? String(floorIdParam) : ''
+  );
+  const [debouncedQ, setDebouncedQ] = useState('');
 
-  const loadPending = () => {
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(searchQ.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQ]);
+
+  const loadPending = useCallback(() => {
     setLoading(true);
+    const params = {};
+    if (debouncedQ) params.q = debouncedQ;
+    if (filterFloorId) params.floor_id = filterFloorId;
     api.warehouseStock
-      .batchesPendingQc()
+      .batchesPendingQc(params)
       .then(setPending)
       .catch(() => setPending([]))
       .finally(() => setLoading(false));
-  };
+  }, [debouncedQ, filterFloorId]);
 
   useEffect(() => {
     loadPending();
-  }, []);
+  }, [loadPending]);
 
+  // Список: дополнительный фильтр по order_id/floor_id из URL (переход с Пошива «Открыть ОТК»)
+  const displayList = useMemo(() => {
+    if (!pending.length) return [];
+    if (orderIdParam != null && floorIdParam != null) {
+      return pending.filter((row) => row.order_id === orderIdParam && row.floor_id === floorIdParam);
+    }
+    return pending;
+  }, [pending, orderIdParam, floorIdParam]);
+
+  // При открытии с batch_id (после «Завершить пошив → ОТК») — один раз открыть форму этой партии
+  const openedBatchIdRef = useRef(null);
   useEffect(() => {
-    if (createOpen && orders.length === 0) {
-      api.orders.list().then(setOrders).catch(() => setOrders([]));
+    if (!batchIdParam || loading || !pending.length) return;
+    if (openedBatchIdRef.current === batchIdParam) return;
+    const row = pending.find((r) => r.id === batchIdParam);
+    if (row) {
+      openedBatchIdRef.current = batchIdParam;
+      openModal(row);
     }
-    if (createOpen && floors.length === 0) {
-      api.references.buildingFloors().then(setFloors).catch(() => setFloors([]));
-    }
-  }, [createOpen, orders.length, floors.length]);
-
-  const handleCreateBatch = async (e) => {
-    e.preventDefault();
-    const order_id = parseInt(createOrderId, 10);
-    const floor_id = parseInt(createFloorId, 10);
-    if (Number.isNaN(order_id) || Number.isNaN(floor_id)) {
-      setCreateError('Укажите заказ и этаж');
-      return;
-    }
-    setCreateLoading(true);
-    setCreateError('');
-    try {
-      await api.sewingPlans.finishBatch({ order_id, floor_id });
-      setCreateOpen(false);
-      setCreateOrderId('');
-      setCreateFloorId('');
-      loadPending();
-    } catch (err) {
-      setCreateError(err.message || 'Ошибка создания партии');
-    } finally {
-      setCreateLoading(false);
-    }
-  };
+  }, [batchIdParam, loading, pending]);
 
   const openModal = async (row) => {
     setError('');
@@ -146,66 +149,44 @@ export default function Qc() {
         <PrintButton />
       </div>
       <p className="text-sm text-neon-muted mb-4">
-        Партии пошива, готовые к проверке (статус «Завершён», факт введён). Проверьте каждую партию по размерам — после сохранения принятая продукция поступит на склад.
+        Партии пошива, готовые к проверке. Партии создаются при завершении пошива на странице «Пошив». Проверьте каждую партию по размерам — после сохранения принятая продукция поступит на склад.
       </p>
 
-      <div className="no-print mb-6">
-        <button
-          type="button"
-          onClick={() => setCreateOpen(!createOpen)}
-          className="flex items-center gap-2 px-4 py-2 rounded-card bg-neon-surface border border-neon-border hover:shadow-neon transition-colors text-neon-text"
+      {/* Фильтры: поиск по заказу/модели/клиенту, этаж */}
+      <div className="no-print flex flex-wrap items-center gap-3 mb-4">
+        <input
+          type="text"
+          placeholder="Поиск по заказу, модели, клиенту"
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          className="px-3 py-2 rounded-lg bg-neon-surface border border-neon-border text-neon-text min-w-[200px] text-sm"
+        />
+        <select
+          value={filterFloorId}
+          onChange={(e) => setFilterFloorId(e.target.value)}
+          className="px-3 py-2 rounded-lg bg-neon-surface border border-neon-border text-neon-text text-sm"
         >
-          <span className={createOpen ? 'rotate-90' : ''}>▶</span>
-          Создать партию из пошива
-        </button>
-        {createOpen && (
-          <div className="mt-2 p-4 rounded-card bg-neon-surface border border-neon-border">
-            <p className="text-sm text-neon-muted mb-3">
-              Агрегировать факт пошива по заказу и этажу и создать партию (статус DONE). Партия появится в списке выше для проведения ОТК.
-            </p>
-            <form onSubmit={handleCreateBatch} className="flex flex-wrap items-end gap-3">
-              <div>
-                <label className="block text-sm text-neon-muted mb-1">Заказ</label>
-                <select
-                  value={createOrderId}
-                  onChange={(e) => setCreateOrderId(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-neon-text"
-                >
-                  <option value="">—</option>
-                  {orders.map((o) => (
-                    <option key={o.id} value={o.id}>#{o.id} {o.title} {o.model_name || ''}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-neon-muted mb-1">Этаж</label>
-                <select
-                  value={createFloorId}
-                  onChange={(e) => setCreateFloorId(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-neon-text"
-                >
-                  <option value="">—</option>
-                  {floors.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
-                  ))}
-                </select>
-              </div>
-              <NeonButton type="submit" disabled={createLoading}>
-                {createLoading ? 'Создание...' : 'Создать партию'}
-              </NeonButton>
-              {createError && <p className="text-sm text-red-400 w-full">{createError}</p>}
-            </form>
-          </div>
-        )}
+          <option value="">Все этажи</option>
+          {SEWING_FLOOR_IDS.map((fid) => (
+            <option key={fid} value={fid}>{fid} этаж</option>
+          ))}
+        </select>
       </div>
 
       <NeonCard className="rounded-card overflow-hidden p-0">
         {loading ? (
           <div className="p-8 text-center text-neon-muted">Загрузка...</div>
-        ) : pending.length === 0 ? (
-          <div className="p-8 text-neon-muted">Нет партий, ожидающих ОТК</div>
+        ) : displayList.length === 0 ? (
+          <div className="p-8 text-neon-muted">
+            {orderIdParam != null && floorIdParam != null ? 'По выбранному заказу и этажу партий нет' : 'Нет партий, ожидающих ОТК'}
+          </div>
         ) : (
           <div className="overflow-x-auto">
+            {orderIdParam != null && floorIdParam != null && (
+              <p className="px-4 py-2 text-sm text-neon-muted border-b border-white/10">
+                Показаны партии: заказ #{orderIdParam}, этаж #{floorIdParam}
+              </p>
+            )}
             <table className="w-full">
               <thead>
                 <tr className="bg-accent-3/80 border-b border-white/25">
@@ -218,7 +199,7 @@ export default function Qc() {
                 </tr>
               </thead>
               <tbody>
-                {pending.map((row) => (
+                {displayList.map((row) => (
                   <tr key={row.id} className="border-b border-white/15">
                     <td className="px-4 py-3 font-medium text-neon-text">{row.batch_code}</td>
                     <td className="px-4 py-3 text-neon-text">{orderLabel(row)}</td>

@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { Chip, NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
 import PrintButton from '../components/PrintButton';
@@ -36,21 +36,30 @@ const VIEW_MODES = [
   { key: 'fact_plan', label: 'Факт/план' },
 ];
 
+// Стили этапов: DONE — подсвечен, IN_PROGRESS — текущий, NOT_STARTED — приглушённый
 const STATUS_STYLE = {
-  DONE: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40',
-  IN_PROGRESS: 'bg-lime-500/20 text-lime-300 border-lime-400/40',
-  NOT_STARTED: 'bg-slate-500/20 text-slate-200 border-slate-300/30',
-  OVERDUE: 'bg-red-500/25 text-red-300 border-red-400/50',
+  DONE:
+    'bg-emerald-500/30 text-emerald-200 border-emerald-400/60 shadow-[0_0_0_1px_rgba(52,211,153,0.35)] ring-1 ring-emerald-400/30',
+  IN_PROGRESS:
+    'bg-lime-500/25 text-lime-200 border-lime-400/50 shadow-[0_0_0_1px_rgba(163,230,53,0.3)]',
+  NOT_STARTED: 'bg-slate-700/40 text-slate-400 border-slate-500/30',
+  OVERDUE: 'bg-red-500/25 text-red-300 border-red-400/50 shadow-[0_0_0_1px_rgba(248,113,113,0.3)]',
 };
 
+// Индикаторы этапов под названием заказа: ✓ DONE (зелёный), ⏳ IN_PROGRESS (жёлтый), ○ NOT_STARTED (серый)
+const STAGE_INDICATOR = {
+  DONE: { icon: '✓', className: 'text-emerald-400' },
+  IN_PROGRESS: { icon: '⏳', className: 'text-amber-400' },
+  NOT_STARTED: { icon: '○', className: 'text-slate-500' },
+};
+
+// Порядок этапов соответствует производственной цепочке: Закуп → Раскрой → Пошив → ОТК → Склад → Отгрузка
 const STAGE_COLUMNS = [
   { key: 'procurement', title: 'ЗАКУП' },
-  { key: 'warehouse', title: 'СКЛАД' },
-  { key: 'cutting', title: 'ЗАКРОЙ' },
+  { key: 'cutting', title: 'РАСКРОЙ' },
   { key: 'sewing', title: 'ПОШИВ' },
   { key: 'qc', title: 'ОТК' },
-  { key: 'packing', title: 'УПАКОВКА' },
-  { key: 'fg_warehouse', title: 'СКЛАД ГП' },
+  { key: 'warehouse', title: 'СКЛАД' },
   { key: 'shipping', title: 'ОТГРУЗКА' },
 ];
 
@@ -63,7 +72,7 @@ const COL_WIDTHS = {
   deadline: 140,
 };
 
-const GRID_TEMPLATE = `${COL_WIDTHS.client}px ${COL_WIDTHS.priority}px ${COL_WIDTHS.created}px repeat(8, ${COL_WIDTHS.stage}px) ${COL_WIDTHS.forecast}px ${COL_WIDTHS.deadline}px`;
+const GRID_TEMPLATE = `${COL_WIDTHS.client}px ${COL_WIDTHS.priority}px ${COL_WIDTHS.created}px repeat(6, ${COL_WIDTHS.stage}px) ${COL_WIDTHS.forecast}px ${COL_WIDTHS.deadline}px`;
 const GRID_MIN_WIDTH = COL_WIDTHS.client + COL_WIDTHS.priority + COL_WIDTHS.created + STAGE_COLUMNS.length * COL_WIDTHS.stage + COL_WIDTHS.forecast + COL_WIDTHS.deadline;
 const UNIFIED_BOX_CLASS = 'm-1 h-[96px] rounded-lg border border-white/15 bg-slate-900/45 p-2';
 
@@ -99,6 +108,26 @@ function formatDaysLabel(days) {
   return `${val} дней`;
 }
 
+/** URL перехода при клике по этапу: открываем соответствующий модуль с фильтром по заказу */
+function getStageUrl(orderId, stageKey) {
+  switch (stageKey) {
+    case 'procurement':
+      return `/procurement?order_id=${orderId}`;
+    case 'cutting':
+      return `/cutting?order_id=${orderId}`;
+    case 'sewing':
+      return `/sewing?order_id=${orderId}`;
+    case 'qc':
+      return `/qc?order_id=${orderId}`;
+    case 'warehouse':
+      return `/warehouse?order_id=${orderId}`;
+    case 'shipping':
+      return `/shipments?order_id=${orderId}`;
+    default:
+      return `/orders/${orderId}?stage=${stageKey}`;
+  }
+}
+
 function calcFilterCounters(orders) {
   const today = new Date().toISOString().slice(0, 10);
   const doneCheck = (o) => (o.stages || []).every((s) => s.status === 'DONE');
@@ -117,9 +146,14 @@ function calcFilterCounters(orders) {
   );
 }
 
+/**
+ * Ячейка этапа: заполняет ячейку до краёв, единый шаблон, подсветка по статусу (DONE / IN_PROGRESS / NOT_STARTED).
+ */
 function StageCell({ stage, viewMode, orderId, onOpenStage }) {
   const hasSchedule = (stage.planned_days || 0) > 0 && stage.planned_start_date;
   const statusClass = STATUS_STYLE[stage.status] || STATUS_STYLE.NOT_STARTED;
+  const isDone = stage.status === 'DONE';
+  const isProgress = stage.status === 'IN_PROGRESS';
 
   return (
     <button
@@ -128,22 +162,26 @@ function StageCell({ stage, viewMode, orderId, onOpenStage }) {
         e.stopPropagation();
         onOpenStage(orderId, stage.stage_key);
       }}
-      className={`m-1 h-[96px] rounded-lg border p-2 text-left transition hover:brightness-110 ${statusClass}`}
+      className={`absolute inset-0 w-full h-full rounded-md border p-1.5 text-left transition hover:brightness-110 flex flex-col ${statusClass}`}
       title={stage.title_ru}
     >
-      <div className="text-[10px] font-semibold tracking-wide opacity-90">{stage.title_ru}</div>
+      <div className="flex items-center justify-between gap-0.5 min-h-0 flex-shrink-0">
+        <span className="text-[10px] font-semibold tracking-wide truncate">{stage.title_ru}</span>
+        {isDone && <span className="text-emerald-300 text-[10px] flex-shrink-0" aria-hidden>✓</span>}
+        {isProgress && <span className="text-lime-300 text-[9px] flex-shrink-0 opacity-90">В работе</span>}
+      </div>
       {viewMode === 'schedule' ? (
-        <div className="mt-1 space-y-1">
-          <div className="text-xs font-semibold leading-none">{hasSchedule ? formatDaysLabel(stage.planned_days) : '-'}</div>
-          <div className="text-[11px] leading-none opacity-90">{hasSchedule ? formatDate(stage.planned_start_date) : '-'}</div>
-          <div className="text-[11px] leading-none opacity-90">{hasSchedule ? formatDate(stage.planned_end_date) : '-'}</div>
+        <div className="mt-0.5 space-y-0.5 flex-1 min-h-0">
+          <div className="text-xs font-semibold leading-tight">{hasSchedule ? formatDaysLabel(stage.planned_days) : '—'}</div>
+          <div className="text-[10px] leading-tight opacity-90">{hasSchedule ? formatDate(stage.planned_start_date) : '—'}</div>
+          <div className="text-[10px] leading-tight opacity-90">{hasSchedule ? formatDate(stage.planned_end_date) : '—'}</div>
         </div>
       ) : (
-        <div className="mt-2">
-          <div className="text-lg font-bold leading-none">
+        <div className="mt-1 flex-1 min-h-0 flex flex-col justify-center">
+          <div className="text-base font-bold leading-tight">
             {stage.actual_qty}/{stage.planned_qty}
           </div>
-          <div className="mt-1 text-xs opacity-90">{stage.percent}%</div>
+          <div className="text-[11px] opacity-90">{stage.percent}%</div>
         </div>
       )}
     </button>
@@ -226,6 +264,12 @@ function BoardHeader({
               Завершенные
             </label>
           </div>
+
+          <Link to="/production-dashboard">
+            <NeonButton variant="secondary" className="h-[42px] shrink-0 px-3 py-2 text-sm whitespace-nowrap">
+              Открыть дашборд
+            </NeonButton>
+          </Link>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -243,7 +287,6 @@ function BoardHeader({
           ))}
 
           <div className="flex min-w-0 w-full flex-wrap items-center gap-3 sm:ml-auto sm:w-auto lg:flex-nowrap">
-            {/* Переключатель вида: две отдельные кнопки с читаемым интервалом */}
             <div className="flex h-[44px] min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2">
               {VIEW_MODES.map((mode) => (
                 <button
@@ -298,12 +341,29 @@ function BoardRow({ orderRow, viewMode, onOpenOrder, onOpenStage }) {
     >
       <div className={`${stickyLeft} left-0 border-r border-white/10 px-0`}>
         <UnifiedCellBox className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-700 text-xs font-semibold text-slate-100">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-semibold text-slate-100">
             {(orderRow.client_name || '?').slice(0, 2).toUpperCase()}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{orderRow.client_name || '—'}</div>
             <div className="truncate text-xs text-slate-400">{orderRow.model_name || '—'} • #{orderRow.order_number || orderRow.id}</div>
+            {/* Линия этапов производства: ✓ DONE (зелёный), ⏳ IN_PROGRESS (жёлтый), ○ NOT_STARTED (серый) */}
+            {orderRow.production_stages && orderRow.production_stages.length > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-0.5 text-[10px] leading-tight">
+                {orderRow.production_stages.map((s, i) => {
+                  const ind = STAGE_INDICATOR[s.status] || STAGE_INDICATOR.NOT_STARTED;
+                  return (
+                    <span key={s.key} className="inline-flex items-center shrink-0">
+                      {i > 0 && <span className="mx-0.5 text-slate-600">—</span>}
+                      <span className={`${ind.className}`} title={`${s.label}: ${s.status}`}>
+                        {ind.icon}
+                      </span>
+                      <span className="ml-0.5 text-slate-500">{s.label}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </UnifiedCellBox>
       </div>
@@ -325,7 +385,10 @@ function BoardRow({ orderRow, viewMode, onOpenOrder, onOpenStage }) {
       {STAGE_COLUMNS.map((stageCol) => {
         const stage = (orderRow.stages || []).find((s) => s.stage_key === stageCol.key);
         return (
-          <div key={`${orderRow.id}-${stageCol.key}`} className="border-r border-white/10 px-0 py-0">
+          <div
+            key={`${orderRow.id}-${stageCol.key}`}
+            className="border-r border-white/10 p-0 relative min-h-[104px]"
+          >
             {stage ? (
               <StageCell
                 stage={stage}
@@ -334,9 +397,9 @@ function BoardRow({ orderRow, viewMode, onOpenOrder, onOpenStage }) {
                 onOpenStage={onOpenStage}
               />
             ) : (
-              <UnifiedCellBox className="flex items-center justify-center text-sm text-slate-400">
-                -
-              </UnifiedCellBox>
+              <div className="absolute inset-0 w-full h-full flex items-center justify-center text-sm text-slate-500 bg-slate-800/30 border border-transparent rounded-md">
+                —
+              </div>
             )}
           </div>
         );
@@ -372,9 +435,15 @@ export default function OrdersBoard() {
   const [q, setQ] = useState('');
   const [managerSearch, setManagerSearch] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
-  const [filter, setFilter] = useState('all');
+  // Фильтр из URL для перехода с дашборда (например /board?filter=overdue)
+  const [filter, setFilter] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    const f = p.get('filter');
+    return FILTERS.some((x) => x.key === f) ? f : 'all';
+  });
   const [priority, setPriority] = useState('');
-  const [showCompleted, setShowCompleted] = useState(false);
+  // По умолчанию показываем все заказы (в т.ч. готовые), иначе при одном готовом заказе доска пустая
+  const [showCompleted, setShowCompleted] = useState(true);
   const [sort, setSort] = useState('deadline');
   const [order, setOrder] = useState('asc');
   const [viewMode, setViewMode] = useState('schedule');
@@ -429,7 +498,7 @@ export default function OrdersBoard() {
   const filterCounters = useMemo(() => calcFilterCounters(data.orders || []), [data.orders]);
 
   const onOpenOrder = (id) => navigate(`/orders/${id}`);
-  const onOpenStage = (id, stageKey) => navigate(`/orders/${id}?stage=${stageKey}`);
+  const onOpenStage = (id, stageKey) => navigate(getStageUrl(id, stageKey));
 
   return (
     <section className="min-h-full overflow-x-hidden text-neon-text">
