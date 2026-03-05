@@ -14,7 +14,7 @@ module.exports = (sequelize, DataTypes) => {
       started_at: { type: DataTypes.DATE, allowNull: true },
       finished_at: { type: DataTypes.DATE, allowNull: true },
       status: {
-        type: DataTypes.ENUM('IN_PROGRESS', 'DONE'),
+        type: DataTypes.ENUM('IN_PROGRESS', 'DONE', 'READY_FOR_QC', 'QC_DONE'),
         allowNull: false,
         defaultValue: 'IN_PROGRESS',
       },

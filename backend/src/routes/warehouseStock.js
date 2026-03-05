@@ -143,9 +143,9 @@ router.post('/sewing', async (req, res, next) => {
 // ————— Партии пошива (для ОТК по партиям) —————
 
 /**
- * GET /api/warehouse-stock/batches/pending-qc — партии, готовые к ОТК.
- * Условие: sewing_batches.status = 'DONE', по партии ещё нет qc_batches, total_fact > 0.
- * Сортировка: finished_at DESC. Фильтры: q (поиск по заказу/модели/клиенту), floor_id (2, 3 или 4).
+ * GET /api/warehouse-stock/batches/pending-qc — партии пошива, готовые к ОТК.
+ * Партии со статусом READY_FOR_QC (создаются при «Завершить пошив → ОТК»).
+ * Фильтры: q, floor_id.
  */
 router.get('/batches/pending-qc', async (req, res, next) => {
   try {
@@ -155,46 +155,55 @@ router.get('/batches/pending-qc', async (req, res, next) => {
              COALESCE(SUM(sbi.fact_qty), 0)::numeric AS total_fact
       FROM sewing_batches sb
       LEFT JOIN sewing_batch_items sbi ON sbi.batch_id = sb.id
-      LEFT JOIN qc_batches qb ON qb.batch_id = sb.id
-      WHERE sb.status = 'DONE' AND qb.id IS NULL
+      WHERE sb.status = 'READY_FOR_QC'
       GROUP BY sb.id
       HAVING COALESCE(SUM(sbi.fact_qty), 0) > 0
       ORDER BY sb.finished_at DESC NULLS LAST
     `);
-    if (!rows || rows.length === 0) return res.json([]);
-    const orders = await db.Order.findAll({
-      where: { id: [...new Set(rows.map((r) => r.order_id))] },
-      include: [{ model: db.Client, as: 'Client' }],
-      attributes: ['id', 'title', 'model_name', 'tz_code'],
-    });
-    const orderMap = {};
-    orders.forEach((o) => { orderMap[o.id] = o; });
-    const floors = await db.BuildingFloor.findAll({
-      where: { id: [...new Set(rows.map((r) => r.floor_id).filter(Boolean))] },
-      attributes: ['id', 'name'],
-    });
-    const floorMap = {};
-    floors.forEach((f) => { floorMap[f.id] = f; });
-    let list = rows.map((r) => {
-      const order = orderMap[r.order_id];
-      const floor = r.floor_id ? floorMap[r.floor_id] : null;
-      return {
-        id: r.id,
-        batch_code: r.batch_code,
-        order_id: r.order_id,
-        order_title: order?.title || `#${r.order_id}`,
-        tz_code: order?.tz_code || '',
-        model_name: order?.model_name || '',
-        client_name: order?.Client?.name || '—',
-        floor_id: r.floor_id,
-        floor_name: floor?.name || '—',
-        finished_at: r.finished_at,
-        total_fact: Number(r.total_fact) || 0,
-      };
-    });
+    const orderIds = new Set();
+    const floorIds = new Set();
+    let list = [];
+    if (rows && rows.length > 0) {
+      rows.forEach((r) => {
+        orderIds.add(r.order_id);
+        if (r.floor_id) floorIds.add(r.floor_id);
+      });
+      const orders = await db.Order.findAll({
+        where: { id: [...orderIds] },
+        include: [{ model: db.Client, as: 'Client' }],
+        attributes: ['id', 'title', 'model_name', 'tz_code'],
+      });
+      const orderMap = {};
+      orders.forEach((o) => { orderMap[o.id] = o; });
+      const allFloors = await db.BuildingFloor.findAll({
+        where: { id: [...floorIds] },
+        attributes: ['id', 'name'],
+      });
+      const floorMap = {};
+      allFloors.forEach((f) => { floorMap[f.id] = f; });
+      list = rows.map((r) => {
+        const order = orderMap[r.order_id];
+        const floor = r.floor_id ? floorMap[r.floor_id] : null;
+        return {
+          id: r.id,
+          batch_code: r.batch_code,
+          order_id: r.order_id,
+          order_title: order?.title || `#${r.order_id}`,
+          tz_code: order?.tz_code || '',
+          model_name: order?.model_name || '',
+          client_name: order?.Client?.name || '—',
+          floor_id: r.floor_id,
+          floor_name: floor?.name || '—',
+          finished_at: r.finished_at,
+          total_fact: Number(r.total_fact) || 0,
+          noBatch: false,
+        };
+      });
+    }
+
     if (floor_id) {
-      const floorIds = String(floor_id).split(',').map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id));
-      if (floorIds.length) list = list.filter((i) => i.floor_id != null && floorIds.includes(i.floor_id));
+      const fids = String(floor_id).split(',').map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id));
+      if (fids.length) list = list.filter((i) => i.floor_id != null && fids.includes(i.floor_id));
     }
     if (q && String(q).trim()) {
       const lower = String(q).trim().toLowerCase();
@@ -207,6 +216,11 @@ router.get('/batches/pending-qc', async (req, res, next) => {
           (i.batch_code && i.batch_code.toLowerCase().includes(lower))
       );
     }
+    list.sort((a, b) => {
+      const da = a.finished_at ? new Date(a.finished_at) : new Date(0);
+      const db_ = b.finished_at ? new Date(b.finished_at) : new Date(0);
+      return db_ - da;
+    });
     res.json(list);
   } catch (err) {
     next(err);
@@ -237,72 +251,10 @@ router.get('/batches/:id', async (req, res, next) => {
 });
 
 // ————— ОТК —————
+// Единственный источник очереди ОТК: GET /batches/pending-qc (sewing_batches без qc_batches).
+// Устаревший GET /qc/pending (sewing_plans, QcRecord) удалён — ломал поток Пошив → ОТК.
 
-/**
- * GET /api/warehouse-stock/qc/pending — заказы/модели для ОТК (легаси, по заказам без партий).
- * Данные только из завершённого пошива: sewing_fact_total > 0, QC по этому размеру ещё не создан.
- */
-router.get('/qc/pending', async (req, res, next) => {
-  try {
-    const [sewingSums] = await db.sequelize.query(`
-      SELECT order_id, model_size_id, SUM(fact_qty)::int AS sewing_fact_total
-      FROM sewing_plans
-      GROUP BY order_id, model_size_id
-      HAVING SUM(fact_qty) > 0
-    `);
-    if (!sewingSums || sewingSums.length === 0) {
-      return res.json([]);
-    }
-    const withQc = await db.QcRecord.findAll({
-      attributes: ['order_id', 'model_size_id'],
-      raw: true,
-    });
-    const qcKeys = new Set(withQc.map((r) => `${r.order_id}_${r.model_size_id}`));
-    const pending = sewingSums.filter((r) => !qcKeys.has(`${r.order_id}_${r.model_size_id}`));
-    if (pending.length === 0) return res.json([]);
-
-    const orderIds = [...new Set(pending.map((r) => r.order_id))];
-    const sizeIds = [...new Set(pending.map((r) => r.model_size_id))];
-    const orders = await db.Order.findAll({
-      where: { id: orderIds },
-      include: [{ model: db.Client, as: 'Client' }],
-    });
-    const orderMap = {};
-    orders.forEach((o) => { orderMap[o.id] = o; });
-    const modelSizes = await db.ModelSize.findAll({
-      where: { id: sizeIds },
-      include: [{ model: db.Size, as: 'Size' }],
-    });
-    const sizeMap = {};
-    modelSizes.forEach((ms) => { sizeMap[ms.id] = ms; });
-
-    const byOrder = {};
-    for (const r of pending) {
-      const o = orderMap[r.order_id];
-      const ms = sizeMap[r.model_size_id];
-      if (!o || !ms) continue;
-      if (!byOrder[r.order_id]) {
-        byOrder[r.order_id] = {
-          order_id: o.id,
-          order_title: o.title,
-          model_name: o.model_name || '',
-          client_name: o.Client?.name || '—',
-          items: [],
-        };
-      }
-      byOrder[r.order_id].items.push({
-        model_size_id: r.model_size_id,
-        size_name: ms.Size?.name || `#${r.model_size_id}`,
-        sewing_fact_total: r.sewing_fact_total,
-      });
-    }
-    res.json(Object.values(byOrder));
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** GET /api/warehouse-stock/qc?order_id= — записи ОТК по заказу (легаси) */
+/** GET /api/warehouse-stock/qc?order_id= — записи ОТК по заказу (легаси, QcRecord) */
 router.get('/qc', async (req, res, next) => {
   try {
     const { order_id } = req.query;
@@ -319,10 +271,9 @@ router.get('/qc', async (req, res, next) => {
 });
 
 /**
- * POST /api/warehouse-stock/qc/batch — ОТК по партии (по размерам).
+ * POST /api/warehouse-stock/qc/batch — ОТК по партии (единый поток: только через партии, не QcRecord).
  * body: { batch_id, items: [{ model_size_id, checked_qty, passed_qty }] }
- * Правила: checked_qty по размеру = fact_qty из партии по умолчанию; passed_qty <= checked_qty; defect = checked - passed.
- * После сохранения: создаётся qc_batches + qc_batch_items, склад пополняется по passed_qty (warehouse_stock по batch_id).
+ * Создаётся qc_batches (batch_id UNIQUE) + qc_batch_items; партия исчезает из pending-qc; склад пополняется по passed_qty.
  */
 router.post('/qc/batch', async (req, res, next) => {
   const t = await db.sequelize.transaction();
@@ -339,9 +290,9 @@ router.post('/qc/batch', async (req, res, next) => {
       await t.rollback();
       return res.status(404).json({ error: 'Партия не найдена' });
     }
-    if (batch.status !== 'DONE') {
+    if (batch.status !== 'READY_FOR_QC') {
       await t.rollback();
-      return res.status(400).json({ error: 'Партия должна быть в статусе DONE' });
+      return res.status(400).json({ error: 'Партия должна быть в статусе «Готова к ОТК» (READY_FOR_QC)' });
     }
     const existingQc = await db.QcBatch.findOne({ where: { batch_id: Number(batch_id) }, transaction: t });
     if (existingQc) {
@@ -351,7 +302,8 @@ router.post('/qc/batch', async (req, res, next) => {
 
     const batchItemsBySize = {};
     batch.SewingBatchItems.forEach((bi) => {
-      batchItemsBySize[bi.model_size_id] = { planned_qty: Number(bi.planned_qty) || 0, fact_qty: Number(bi.fact_qty) || 0 };
+      const key = bi.model_size_id != null ? bi.model_size_id : 'null';
+      batchItemsBySize[key] = { planned_qty: Number(bi.planned_qty) || 0, fact_qty: Number(bi.fact_qty) || 0 };
     });
 
     let checkedTotal = 0;
@@ -359,7 +311,13 @@ router.post('/qc/batch', async (req, res, next) => {
     let defectTotal = 0;
     const qcItems = [];
 
-    for (const it of items) {
+    const validItems = items.filter((it) => (Number(it.model_size_id) || 0) > 0);
+    if (validItems.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Нет корректных позиций по размерам. Проверьте, что партия содержит размеры (model_size_id).' });
+    }
+
+    for (const it of validItems) {
       const model_size_id = Number(it.model_size_id);
       const factQty = batchItemsBySize[model_size_id]?.fact_qty ?? 0;
       let checked = parseInt(it.checked_qty, 10);
@@ -395,7 +353,8 @@ router.post('/qc/batch', async (req, res, next) => {
         },
         { transaction: t }
       );
-      if (it.passed_qty > 0) {
+      if (it.passed_qty > 0 && it.model_size_id > 0) {
+        const batchCode = batch.batch_code || `batch-${batch_id}`;
         const [stockRow, created] = await db.WarehouseStock.findOrCreate({
           where: {
             batch_id: Number(batch_id),
@@ -404,7 +363,7 @@ router.post('/qc/batch', async (req, res, next) => {
           defaults: {
             order_id: batch.order_id,
             model_size_id: it.model_size_id,
-            batch: batch.batch_code,
+            batch: batchCode,
             batch_id: Number(batch_id),
             qty: it.passed_qty,
           },
@@ -415,6 +374,16 @@ router.post('/qc/batch', async (req, res, next) => {
         }
       }
     }
+
+    // Партия переходит в статус ОТК проведён
+    await batch.update({ status: 'QC_DONE' }, { transaction: t });
+
+    // Цепочка: ОТК DONE → Склад IN_PROGRESS
+    const now = new Date();
+    const qcStage = await db.OrderStage.findOne({ where: { order_id: batch.order_id, stage_key: 'qc' }, transaction: t });
+    if (qcStage) await qcStage.update({ status: 'DONE', completed_at: now }, { transaction: t });
+    const whStage = await db.OrderStage.findOne({ where: { order_id: batch.order_id, stage_key: 'warehouse' }, transaction: t });
+    if (whStage) await whStage.update({ status: 'IN_PROGRESS', started_at: now }, { transaction: t });
 
     await t.commit();
 
@@ -718,6 +687,47 @@ router.post('/shipments', async (req, res, next) => {
     res.status(201).json(withAssoc);
   } catch (err) {
     await t.rollback();
+    next(err);
+  }
+});
+
+/**
+ * POST /api/warehouse-stock/orders/:order_id/send-to-shipping
+ * Отправить на отгрузку: warehouse DONE, shipping IN_PROGRESS (единый пайплайн).
+ */
+router.post('/orders/:order_id/send-to-shipping', async (req, res, next) => {
+  try {
+    const order_id = Number(req.params.order_id);
+    if (!order_id) return res.status(400).json({ error: 'Укажите order_id' });
+    const order = await db.Order.findByPk(order_id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    const now = new Date();
+    const whStage = await db.OrderStage.findOne({ where: { order_id, stage_key: 'warehouse' } });
+    if (whStage) await whStage.update({ status: 'DONE', completed_at: now });
+    const shipStage = await db.OrderStage.findOne({ where: { order_id, stage_key: 'shipping' } });
+    if (shipStage) await shipStage.update({ status: 'IN_PROGRESS', started_at: now });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/warehouse-stock/shipments/:id/complete
+ * Завершить отгрузку: shipment status = completed, order_stages.shipping = DONE для заказа.
+ */
+router.post('/shipments/:id/complete', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Укажите id отгрузки' });
+    const shipment = await db.Shipment.findByPk(id, { attributes: ['id', 'order_id'] });
+    if (!shipment) return res.status(404).json({ error: 'Отгрузка не найдена' });
+    await shipment.update({ status: 'completed' });
+    const now = new Date();
+    const shipStage = await db.OrderStage.findOne({ where: { order_id: shipment.order_id, stage_key: 'shipping' } });
+    if (shipStage) await shipStage.update({ status: 'DONE', completed_at: now });
+    res.json({ ok: true });
+  } catch (err) {
     next(err);
   }
 });

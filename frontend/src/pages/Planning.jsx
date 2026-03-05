@@ -251,15 +251,16 @@ export default function Planning() {
     } catch (_) {}
   }, [dateMode]);
 
-  // Сохранение фильтров в localStorage (цех, модель, даты) — чтобы не сбрасывались при обновлении страницы
+  // Сохранение фильтров в localStorage (цех, модель, даты, этаж) — чтобы не сбрасывались при переходах и обновлении
   useEffect(() => {
     try {
       if (workshopId) localStorage.setItem(PLANNING_WORKSHOP_KEY, workshopId);
       if (orderId) localStorage.setItem(PLANNING_ORDER_KEY, orderId);
       if (from) localStorage.setItem(PLANNING_FROM_KEY, from);
       if (to) localStorage.setItem(PLANNING_TO_KEY, to);
+      if (floorId) localStorage.setItem(FLOOR_STORAGE_KEY, floorId);
     } catch (_) {}
-  }, [workshopId, orderId, from, to]);
+  }, [workshopId, orderId, from, to, floorId]);
 
   // Сохранение состояния блока «План на неделю»
   useEffect(() => {

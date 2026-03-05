@@ -39,6 +39,7 @@ const db = {
   Technologist: require('./Technologist')(sequelize, Sequelize.DataTypes),
   Sewer: require('./Sewer')(sequelize, Sequelize.DataTypes),
   Order: require('./Order')(sequelize, Sequelize.DataTypes),
+  OrderStage: require('./OrderStage')(sequelize, Sequelize.DataTypes),
   Operation: require('./Operation')(sequelize, Sequelize.DataTypes),
   OrderOperation: require('./OrderOperation')(sequelize, Sequelize.DataTypes),
   OrderOperationVariant: require('./OrderOperationVariant')(sequelize, Sequelize.DataTypes),
@@ -74,6 +75,8 @@ const db = {
   OrderSizeMatrix: require('./OrderSizeMatrix')(sequelize, Sequelize.DataTypes),
   OrderRostovka: require('./OrderRostovka')(sequelize, Sequelize.DataTypes),
   SewingPlan: require('./SewingPlan')(sequelize, Sequelize.DataTypes),
+  SewingPlanRow: require('./SewingPlanRow')(sequelize, Sequelize.DataTypes),
+  SewingFact: require('./SewingFact')(sequelize, Sequelize.DataTypes),
   SewingBatch: require('./SewingBatch')(sequelize, Sequelize.DataTypes),
   SewingBatchItem: require('./SewingBatchItem')(sequelize, Sequelize.DataTypes),
   SewingOrderFloor: require('./SewingOrderFloor')(sequelize, Sequelize.DataTypes),
@@ -112,6 +115,8 @@ db.Technologist.hasMany(db.Order, { foreignKey: 'technologist_id' });
 db.Order.belongsTo(db.Technologist, { foreignKey: 'technologist_id' });
 
 db.Order.hasMany(db.OrderOperation, { foreignKey: 'order_id' });
+db.Order.hasMany(db.OrderStage, { foreignKey: 'order_id' });
+db.OrderStage.belongsTo(db.Order, { foreignKey: 'order_id' });
 db.OrderOperation.belongsTo(db.Order, { foreignKey: 'order_id' });
 db.Operation.hasMany(db.OrderOperation, { foreignKey: 'operation_id' });
 db.OrderOperation.belongsTo(db.Operation, { foreignKey: 'operation_id' });
@@ -251,6 +256,14 @@ db.OrderRostovka.belongsTo(db.Size, { foreignKey: 'size_id' });
 
 db.Order.hasMany(db.SewingPlan, { foreignKey: 'order_id' });
 db.SewingPlan.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.Order.hasMany(db.SewingFact, { foreignKey: 'order_id' });
+db.SewingFact.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.Order.hasMany(db.SewingPlanRow, { foreignKey: 'order_id' });
+db.SewingPlanRow.belongsTo(db.Order, { foreignKey: 'order_id' });
+db.BuildingFloor.hasMany(db.SewingPlanRow, { foreignKey: 'floor_id' });
+db.SewingPlanRow.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
+db.BuildingFloor.hasMany(db.SewingFact, { foreignKey: 'floor_id' });
+db.SewingFact.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
 db.BuildingFloor.hasMany(db.SewingPlan, { foreignKey: 'floor_id' });
 db.SewingPlan.belongsTo(db.BuildingFloor, { foreignKey: 'floor_id' });
 db.ModelSize.hasMany(db.SewingPlan, { foreignKey: 'model_size_id' });

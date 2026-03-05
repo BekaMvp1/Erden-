@@ -987,7 +987,7 @@ router.post('/calc-capacity', async (req, res, next) => {
       parseInt(from.slice(5, 7), 10)
     ).then((r) => r.period);
 
-    // existing_load_day(date) = SUM(planned_qty) по всем заказам этажа на дату в этом периоде
+    // existing_load_day(date) — только из production_plan_day: SUM(planned_qty) по floor_id и дате
     const planDaysAll = await db.ProductionPlanDay.findAll({
       where: {
         period_id: period.id,
@@ -1011,34 +1011,37 @@ router.post('/calc-capacity', async (req, res, next) => {
       }
     }
 
-    // free_capacity_day = max(0, capacity_day - (existing_load - our_plan))
-    // Распределяем не больше available_to_sew (факт раскроя)
+    // free_capacity_day = max(0, capacity_day - existing_load_day) — строгая формула
+    // Для распределения: доступно под наш заказ = free + наш текущий план (мы заменяем план)
     const proposed = [];
     let remainder = remainder_qty_capped;
     let proposed_sum = 0;
 
     for (const date of workingDaysList) {
-      const loadWithoutUs = (existingLoadDay[date] || 0) - (ourPlanDay[date] || 0);
-      const free_capacity_day = Math.max(0, capacityDay - loadWithoutUs);
-      const proposed_day = Math.min(remainder, Math.round(free_capacity_day));
+      const existing_load_day = existingLoadDay[date] || 0;
+      const free_capacity_day = Math.max(0, capacityDay - existing_load_day);
+      const availableForUs = Math.round(free_capacity_day + (ourPlanDay[date] || 0));
+      const proposed_day = Math.min(remainder, Math.max(0, availableForUs));
       remainder -= proposed_day;
       proposed_sum += proposed_day;
       proposed.push({ date, planned_qty: proposed_day });
     }
 
-    // Диагностика в dev
+    // Лог: capacity_day, existing_load_day (реальный), free_capacity_day (после формулы)
     if (process.env.NODE_ENV !== 'production') {
+      const sampleDates = workingDaysList.slice(0, 3);
+      const existing_sample = sampleDates.reduce((o, d) => {
+        o[d] = existingLoadDay[d] ?? 0;
+        return o;
+      }, {});
+      const free_sample = sampleDates.reduce((o, d) => {
+        o[d] = Math.max(0, capacityDay - (existingLoadDay[d] ?? 0));
+        return o;
+      }, {});
       console.log('[planning calc-capacity]', {
-        capacity_week: capacityWeekNum,
-        working_days_count: WORKING_DAYS_PER_WEEK,
         capacity_day: capacityDay,
-        existing_load_day_sample: workingDaysList.slice(0, 3).reduce((o, d) => {
-          o[d] = existingLoadDay[d]; return o;
-        }, {}),
-        free_capacity_day_sample: workingDaysList.slice(0, 3).reduce((o, d) => {
-          o[d] = Math.max(0, capacityDay - (existingLoadDay[d] || 0) + (ourPlanDay[d] || 0));
-          return o;
-        }, {}),
+        existing_load_day_sample: existing_sample,
+        free_capacity_day_sample: free_sample,
         proposed_sum,
         remainder_after: remainder,
       });
@@ -1123,52 +1126,64 @@ router.post('/apply-capacity', async (req, res, next) => {
 
     const period = await requireActivePeriodForDate(db, dateRange[0]);
 
+    // Запись плана через UPSERT в транзакции — защита от двойного вызова (например React StrictMode).
+    // Уникальность: production_plan_day (period_id, order_id, date, workshop_id, floor_id) — findOrCreate по этим полям.
     const t = await db.sequelize.transaction();
     try {
-      const existingRows = await db.ProductionPlanDay.findAll({
-        where: {
-          period_id: period.id,
-          order_id: Number(order_id),
-          workshop_id: Number(workshop_id),
-          floor_id: effectiveFloorId,
-          date: { [Op.between]: [dateRange[0], dateRange[1]] },
-        },
-        transaction: t,
-      });
-      const actualByDate = (existingRows || []).reduce((acc, r) => {
-        acc[r.date] = r.actual_qty || 0;
-        return acc;
-      }, {});
-
-      await db.ProductionPlanDay.destroy({
-        where: {
-          period_id: period.id,
-          order_id: Number(order_id),
-          workshop_id: Number(workshop_id),
-          floor_id: effectiveFloorId,
-          date: { [Op.between]: [dateRange[0], dateRange[1]] },
-        },
-        transaction: t,
-      });
-
       const affectedDates = [];
       for (const d of days) {
         const date = String(d.date || d).slice(0, 10);
-        affectedDates.push(date);
         const plannedQty = Math.max(0, parseInt(d.planned_qty, 10) || 0);
-        const actualQty = actualByDate[date] ?? 0;
-        await db.ProductionPlanDay.create(
-          {
+        const where = {
+          period_id: period.id,
+          order_id: Number(order_id),
+          workshop_id: Number(workshop_id),
+          floor_id: effectiveFloorId,
+          date,
+        };
+        const [row, created] = await db.ProductionPlanDay.findOrCreate({
+          where,
+          defaults: {
             period_id: period.id,
             order_id: Number(order_id),
             workshop_id: Number(workshop_id),
             floor_id: effectiveFloorId,
             date,
             planned_qty: plannedQty,
-            actual_qty: actualQty,
+            actual_qty: 0,
           },
-          { transaction: t }
-        );
+          transaction: t,
+        });
+        if (!created) {
+          await row.update(
+            { planned_qty: plannedQty },
+            { transaction: t }
+          );
+        }
+        affectedDates.push(date);
+      }
+      // Удалить дни из диапазона, которых нет в новом списке (семантика «только эти даты в плане»)
+      const dateSet = new Set(affectedDates);
+      const toDelete = [];
+      const nextDayStr = (s) => {
+        const d = new Date(s + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+      for (let cur = dateRange[0]; cur <= dateRange[1]; cur = nextDayStr(cur)) {
+        if (!dateSet.has(cur)) toDelete.push(cur);
+      }
+      if (toDelete.length > 0) {
+        await db.ProductionPlanDay.destroy({
+          where: {
+            period_id: period.id,
+            order_id: Number(order_id),
+            workshop_id: Number(workshop_id),
+            floor_id: effectiveFloorId,
+            date: { [Op.in]: toDelete },
+          },
+          transaction: t,
+        });
       }
       await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), affectedDates, period.id, t);
       await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id, t);

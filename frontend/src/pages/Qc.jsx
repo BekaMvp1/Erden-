@@ -12,6 +12,17 @@ import PrintButton from '../components/PrintButton';
 import { NeonButton, NeonCard, NeonInput } from '../components/ui';
 
 const SEWING_FLOOR_IDS = [2, 3, 4]; // этажи пошива для фильтра
+const QC_FLOOR_KEY = 'qc_floor_id';
+const QC_SEARCH_KEY = 'qc_search';
+
+function getQcStored(key, fallback) {
+  try {
+    const v = sessionStorage.getItem(key);
+    return v !== null && v !== undefined ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export default function Qc() {
   const [searchParams] = useSearchParams();
@@ -25,22 +36,34 @@ export default function Qc() {
   const [formItems, setFormItems] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [searchQ, setSearchQ] = useState('');
-  const [filterFloorId, setFilterFloorId] = useState(() =>
-    floorIdParam != null && SEWING_FLOOR_IDS.includes(Number(floorIdParam)) ? String(floorIdParam) : ''
+  const [successMsg, setSuccessMsg] = useState('');
+  const [searchQ, setSearchQ] = useState(() =>
+    batchIdParam ? '' : getQcStored(QC_SEARCH_KEY, '')
   );
-  const [debouncedQ, setDebouncedQ] = useState('');
+  const [filterFloorId, setFilterFloorId] = useState(() => {
+    if (floorIdParam != null && SEWING_FLOOR_IDS.includes(Number(floorIdParam))) return String(floorIdParam);
+    return getQcStored(QC_FLOOR_KEY, '');
+  });
+  const [debouncedQ, setDebouncedQ] = useState(() => getQcStored(QC_SEARCH_KEY, ''));
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(searchQ.trim()), 300);
     return () => clearTimeout(t);
   }, [searchQ]);
 
-  const loadPending = useCallback(() => {
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(QC_FLOOR_KEY, filterFloorId || '');
+      sessionStorage.setItem(QC_SEARCH_KEY, searchQ || '');
+    } catch (_) {}
+  }, [filterFloorId, searchQ]);
+
+  const loadPending = useCallback((opts = {}) => {
     setLoading(true);
     const params = {};
     if (debouncedQ) params.q = debouncedQ;
-    if (filterFloorId) params.floor_id = filterFloorId;
+    // При переходе по batch_id не фильтровать по этажу, чтобы новая партия попала в список
+    if (filterFloorId && !opts.ignoreFloorFilter) params.floor_id = filterFloorId;
     api.warehouseStock
       .batchesPendingQc(params)
       .then(setPending)
@@ -49,8 +72,9 @@ export default function Qc() {
   }, [debouncedQ, filterFloorId]);
 
   useEffect(() => {
-    loadPending();
-  }, [loadPending]);
+    // При переходе по batch_id сразу грузим список без фильтра по этажу, чтобы новая партия попала в список
+    loadPending(batchIdParam ? { ignoreFloorFilter: true } : {});
+  }, [loadPending, batchIdParam]);
 
   // Список: дополнительный фильтр по order_id/floor_id из URL (переход с Пошива «Открыть ОТК»)
   const displayList = useMemo(() => {
@@ -61,39 +85,73 @@ export default function Qc() {
     return pending;
   }, [pending, orderIdParam, floorIdParam]);
 
-  // При открытии с batch_id (после «Завершить пошив → ОТК») — один раз открыть форму этой партии
-  const openedBatchIdRef = useRef(null);
-  useEffect(() => {
-    if (!batchIdParam || loading || !pending.length) return;
-    if (openedBatchIdRef.current === batchIdParam) return;
-    const row = pending.find((r) => r.id === batchIdParam);
-    if (row) {
-      openedBatchIdRef.current = batchIdParam;
-      openModal(row);
-    }
-  }, [batchIdParam, loading, pending]);
-
-  const openModal = async (row) => {
+  // Заполнить форму из объекта партии (чтобы открыть по batch_id даже если партии ещё нет в списке)
+  const setModalFromBatch = useCallback((batch) => {
     setError('');
+    setModalBatch(batch);
+    setFormItems(
+      (batch.SewingBatchItems || []).map((item) => {
+        const fact = Number(item.fact_qty) || 0;
+        return {
+          model_size_id: item.model_size_id,
+          size_name: item.ModelSize?.Size?.name || `#${item.model_size_id}`,
+          checked_qty: fact,
+          passed_qty: fact,
+          defect_qty: 0,
+        };
+      })
+    );
+  }, []);
+
+  const openModal = useCallback(async (row) => {
+    setError('');
+    if (row.noBatch) {
+      setError('Партия создаётся только при завершении пошива на странице «Пошив». Завершите пошив по заказу и этажу.');
+      return;
+    }
     try {
       const batch = await api.warehouseStock.batchById(row.id);
-      setModalBatch(batch);
-      setFormItems(
-        (batch.SewingBatchItems || []).map((item) => {
-          const fact = Number(item.fact_qty) || 0;
-          return {
-            model_size_id: item.model_size_id,
-            size_name: item.ModelSize?.Size?.name || `#${item.model_size_id}`,
-            checked_qty: fact,
-            passed_qty: fact,
-            defect_qty: 0,
-          };
-        })
-      );
+      setModalFromBatch(batch);
     } catch (err) {
       setError(err.message || 'Не удалось загрузить партию');
     }
-  };
+  }, []);
+
+  // При открытии с batch_id или order_id+floor_id (после «Завершить пошив → ОТК») — один раз открыть форму
+  const openedRef = useRef(null);
+  const retryCountRef = useRef(0);
+  const MAX_BATCH_ID_RETRIES = 3;
+  useEffect(() => {
+    if (loading) return;
+    const key = batchIdParam ? `batch-${batchIdParam}` : (orderIdParam != null && floorIdParam != null ? `order-${orderIdParam}-${floorIdParam}` : null);
+    if (!key || openedRef.current === key) return;
+    if (batchIdParam) {
+      const row = pending.find((r) => Number(r.id) === Number(batchIdParam));
+      if (row) {
+        openedRef.current = key;
+        openModal(row);
+        return;
+      }
+      if (retryCountRef.current < MAX_BATCH_ID_RETRIES) {
+        retryCountRef.current += 1;
+        const t = setTimeout(() => loadPending({ ignoreFloorFilter: true }), 400);
+        return () => clearTimeout(t);
+      }
+      openedRef.current = key;
+      api.warehouseStock
+        .batchById(batchIdParam)
+        .then((batch) => setModalFromBatch(batch))
+        .catch((err) => setError(err.message || 'Партия не найдена'));
+      return;
+    }
+    if (orderIdParam != null && floorIdParam != null) {
+      const row = pending.find((r) => r.order_id === orderIdParam && r.floor_id === floorIdParam);
+      if (row) {
+        openedRef.current = key;
+        openModal(row);
+      }
+    }
+  }, [batchIdParam, orderIdParam, floorIdParam, loading, pending, openModal]);
 
   const handleChange = (modelSizeId, field, value) => {
     const v = parseInt(value, 10);
@@ -130,6 +188,8 @@ export default function Qc() {
       });
       setModalBatch(null);
       loadPending();
+      setSuccessMsg('ОТК проведён. Принятое количество поступило на склад.');
+      setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
       setError(err.message || 'Ошибка сохранения');
     } finally {
@@ -151,6 +211,7 @@ export default function Qc() {
       <p className="text-sm text-neon-muted mb-4">
         Партии пошива, готовые к проверке. Партии создаются при завершении пошива на странице «Пошив». Проверьте каждую партию по размерам — после сохранения принятая продукция поступит на склад.
       </p>
+      {successMsg && <p className="text-sm text-green-400 mb-4">{successMsg}</p>}
 
       {/* Фильтры: поиск по заказу/модели/клиенту, этаж */}
       <div className="no-print flex flex-wrap items-center gap-3 mb-4">

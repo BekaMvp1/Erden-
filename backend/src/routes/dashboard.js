@@ -67,7 +67,7 @@ router.get('/', async (req, res, next) => {
     const [qcRows] = await db.sequelize.query(`
       SELECT COUNT(*) AS cnt FROM sewing_batches sb
       LEFT JOIN qc_batches qb ON qb.batch_id = sb.id
-      WHERE sb.status = 'DONE' AND qb.id IS NULL
+      WHERE sb.status = 'READY_FOR_QC'
     `);
     kpi.qc_pending = parseInt(qcRows[0]?.cnt || 0, 10);
 

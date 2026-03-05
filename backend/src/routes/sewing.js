@@ -1,6 +1,6 @@
 /**
- * Роуты пошива: очередь задач по этажам
- * GET /tasks — список задач (план/факт по дням) с фильтрами
+ * Роуты пошива: очередь задач по этажам.
+ * Единая цепочка: план из production_plan_day, факт из sewing_fact, статус sewing_order_floors, партии sewing_batches.
  */
 
 const express = require('express');
@@ -27,16 +27,163 @@ function getSunday(dateStr) {
   return d.toISOString().slice(0, 10);
 }
 
-const SEWING_FLOOR_IDS = [2, 3, 4];
+/** Этажи пошива по умолчанию (fallback если в БД нет подходящих) */
+const SEWING_FLOOR_IDS_DEFAULT = [2, 3, 4];
+
+/**
+ * Получить id этажей пошива из building_floors: «Производство» или все кроме Финиш/ОТК и Склад.
+ */
+async function getSewingFloorIds() {
+  const floors = await db.BuildingFloor.findAll({ attributes: ['id', 'name'], raw: true });
+  const withProizv = (floors || []).filter((f) => f.name && /Производство|производство/i.test(f.name));
+  if (withProizv.length > 0) {
+    return withProizv.map((f) => f.id).sort((a, b) => a - b);
+  }
+  const notFinishNotSklad = (floors || []).filter(
+    (f) => f.id !== 1 && (!f.name || !/склад/i.test(f.name))
+  );
+  if (notFinishNotSklad.length > 0) {
+    return notFinishNotSklad.map((f) => f.id).sort((a, b) => a - b);
+  }
+  return SEWING_FLOOR_IDS_DEFAULT;
+}
+
+/**
+ * PUT /api/sewing/fact
+ * Сохранить факт пошива в таблицу sewing_fact (order_id, floor_id, date, fact_qty).
+ * Вызывается при нажатии «Сохранить» на странице Пошив.
+ * Body: { order_id, floor_id, date, fact_qty }
+ */
+router.put('/fact', async (req, res, next) => {
+  try {
+    const sewingFloorIds = await getSewingFloorIds();
+    const { order_id, floor_id, date, fact_qty } = req.body;
+    if (!order_id || floor_id == null || floor_id === '' || !date) {
+      return res.status(400).json({ error: 'Укажите order_id, floor_id и date' });
+    }
+    const effectiveFloorId = Number(floor_id);
+    if (!sewingFloorIds.includes(effectiveFloorId)) {
+      return res.status(400).json({ error: 'Укажите этаж пошива (производственный этаж)' });
+    }
+    const dateStr = String(date).slice(0, 10);
+    const qty = Math.max(0, parseInt(fact_qty, 10) || 0);
+
+    await db.SewingFact.upsert(
+      {
+        order_id: Number(order_id),
+        floor_id: effectiveFloorId,
+        date: dateStr,
+        fact_qty: qty,
+      },
+      { conflictFields: ['order_id', 'floor_id', 'date'] }
+    );
+    const row = await db.SewingFact.findOne({
+      where: { order_id: Number(order_id), floor_id: effectiveFloorId, date: dateStr },
+    });
+
+    res.json(row ? row.get({ plain: true }) : { order_id: Number(order_id), floor_id: effectiveFloorId, date: dateStr, fact_qty: qty });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/sewing/plan-dates?order_id=&floor_id=
+ * Все даты плана по заказу и этажу (для «Завершить → ОТК»: сохранить факт по всем датам).
+ */
+router.get('/plan-dates', async (req, res, next) => {
+  try {
+    const sewingFloorIds = await getSewingFloorIds();
+    const order_id = req.query.order_id != null && req.query.order_id !== '' ? Number(req.query.order_id) : null;
+    const floor_id = req.query.floor_id != null && req.query.floor_id !== '' ? Number(req.query.floor_id) : null;
+    if (!order_id || !floor_id || !sewingFloorIds.includes(floor_id)) {
+      return res.status(400).json({ error: 'Укажите order_id и floor_id (производственный этаж)' });
+    }
+    const planRows = await db.ProductionPlanDay.findAll({
+      where: { order_id, floor_id },
+      attributes: ['date', 'planned_qty'],
+      raw: true,
+      order: [['date', 'ASC']],
+    });
+    const dates = (planRows || []).map((r) => ({
+      date: r.date ? String(r.date).slice(0, 10) : null,
+      planned_qty: Number(r.planned_qty) || 0,
+    })).filter((d) => d.date);
+    const factRows = await db.SewingFact.findAll({
+      where: { order_id, floor_id },
+      attributes: ['date', 'fact_qty'],
+      raw: true,
+    });
+    const factByDate = {};
+    (factRows || []).forEach((r) => {
+      const d = r.date ? String(r.date).slice(0, 10) : null;
+      if (d) factByDate[d] = Number(r.fact_qty) || 0;
+    });
+    const out = dates.map((d) => ({ date: d.date, planned_qty: d.planned_qty, fact_qty: factByDate[d.date] ?? 0 }));
+    res.json({ dates: out });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/sewing/fact/bulk
+ * Сохранить факт по всем датам одним запросом. Обновляет таблицу sewing_fact.
+ * Body: { order_id, floor_id, facts: [ { date, fact_qty }, ... ] } или rows: [ { date, fact_qty? or fact? }, ... ]
+ */
+router.post('/fact/bulk', async (req, res, next) => {
+  try {
+    const sewingFloorIds = await getSewingFloorIds();
+    const { order_id, floor_id, facts, rows } = req.body;
+    const effectiveOrderId = order_id != null && order_id !== '' ? Number(order_id) : NaN;
+    const effectiveFloorId = floor_id != null && floor_id !== '' ? Number(floor_id) : NaN;
+    if (Number.isNaN(effectiveOrderId) || effectiveOrderId <= 0 || Number.isNaN(effectiveFloorId) || !sewingFloorIds.includes(effectiveFloorId)) {
+      return res.status(400).json({
+        error: 'Требуются order_id и floor_id (производственный этаж).',
+        received: { order_id: req.body.order_id, floor_id: req.body.floor_id },
+      });
+    }
+    // Поддержка формата facts: [{ date, fact_qty }] и legacy rows: [{ date, fact_qty } или { date, fact }]
+    const arr = Array.isArray(facts) ? facts : (Array.isArray(rows) ? rows : []);
+    const useFacts = Array.isArray(facts);
+    const t = await db.sequelize.transaction();
+    try {
+      for (const r of arr) {
+        const dateStr = r.date ? String(r.date).slice(0, 10) : null;
+        if (!dateStr) continue;
+        const qty = useFacts
+          ? Math.max(0, parseInt(r.fact_qty, 10) || 0)
+          : Math.max(0, parseInt(r.fact_qty, 10) || parseInt(r.fact, 10) || 0);
+        await db.SewingFact.upsert(
+          {
+            order_id: effectiveOrderId,
+            floor_id: effectiveFloorId,
+            date: dateStr,
+            fact_qty: qty,
+          },
+          { transaction: t, conflictFields: ['order_id', 'floor_id', 'date'] }
+        );
+      }
+      await t.commit();
+      res.json({ ok: true, count: arr.length });
+    } catch (err) {
+      await t.rollback();
+      throw err;
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /api/sewing/board
- * Единый список для UI Пошив: статус из sewing_order_floors, план/факт из production_plan_day.
- * Параметры: status (IN_PROGRESS | DONE | all), date_from, date_to, q
- * Ответ: { floors: [ { floor_id, items: [ { order_id, order_title, client_name, status, done_batch_id, plan_rows, fact_rows, totals } ] } ], period: { date_from, date_to } }
+ * Список для UI Пошив: статус из sewing_order_floors, план из Планирования (production_plan_day), факт из sewing_fact.
+ * Ключ связки: (order_id, floor_id). plan_rows: [{ date, plan_qty }], fact_rows: [{ date, fact_qty }].
+ * Параметры: status, date_from, date_to, q, order_id (опционально)
  */
 router.get('/board', async (req, res, next) => {
   try {
+    const sewingFloorIds = await getSewingFloorIds();
     const today = new Date().toISOString().slice(0, 10);
     const weekStart = getMonday(today);
     const weekEnd = getSunday(today);
@@ -46,33 +193,60 @@ router.get('/board', async (req, res, next) => {
     const statusFilter = (req.query.status || 'IN_PROGRESS').toUpperCase();
     const q = (req.query.q || '').trim();
 
-    // Все пары (order_id, floor_id) по плану в диапазоне дат (только этажи 2–4)
-    const planDays = await db.ProductionPlanDay.findAll({
-      where: {
-        date: { [Op.between]: [date_from, date_to] },
-        floor_id: { [Op.in]: SEWING_FLOOR_IDS },
-      },
-      attributes: ['order_id', 'floor_id', 'date', 'planned_qty', 'actual_qty'],
-      raw: true,
-    });
     const keys = new Set();
-    planDays.forEach((r) => keys.add(`${r.order_id}-${r.floor_id}`));
 
-    // Добавить пары из sewing_order_floors (завершённые без плана в диапазоне)
+    // Ключи (order_id, floor_id) — из sewing_order_floors и раскроя (производственные этажи)
     const orderFloors = await db.SewingOrderFloor.findAll({
-      where: { floor_id: { [Op.in]: SEWING_FLOOR_IDS } },
+      where: { floor_id: { [Op.in]: sewingFloorIds } },
       attributes: ['order_id', 'floor_id', 'status', 'done_batch_id'],
       raw: true,
     });
     orderFloors.forEach((r) => keys.add(`${r.order_id}-${r.floor_id}`));
 
-    // Добавить пары из раскроя (Готово), чтобы показывать в «В работе»
     const cuttingDone = await db.CuttingTask.findAll({
-      where: { status: 'Готово', floor: { [Op.in]: SEWING_FLOOR_IDS } },
+      where: { status: 'Готово', floor: { [Op.in]: sewingFloorIds } },
       attributes: ['order_id', 'floor'],
       raw: true,
     });
     cuttingDone.forEach((r) => keys.add(`${r.order_id}-${r.floor}`));
+
+    // План по дням — единый источник: Планирование (production_plan_day), ключ (order_id, floor_id, date)
+    const orderIdFilter = req.query.order_id ? Number(req.query.order_id) : null;
+    const planWhere = {
+      floor_id: { [Op.in]: sewingFloorIds },
+      date: { [Op.between]: [date_from, date_to] },
+    };
+    if (orderIdFilter != null) planWhere.order_id = orderIdFilter;
+    const planRows = await db.ProductionPlanDay.findAll({
+      where: planWhere,
+      attributes: ['order_id', 'floor_id', 'date', 'planned_qty'],
+      raw: true,
+    });
+    const planByKey = {};
+    (planRows || []).forEach((r) => {
+      const k = `${r.order_id}-${r.floor_id}`;
+      if (!planByKey[k]) planByKey[k] = [];
+      const dateStr = r.date ? String(r.date).slice(0, 10) : null;
+      if (dateStr) planByKey[k].push({ date: dateStr, plan_qty: Number(r.planned_qty) || 0 });
+    });
+    // Чтобы блок этажа появился на Пошиве: добавляем ключи из плана (если запланировали 3 этаж — показываем блок 3)
+    Object.keys(planByKey).forEach((k) => keys.add(k));
+
+    // Факт по дням — только из sewing_fact (order_id, floor_id, date)
+    const factRows = await db.SewingFact.findAll({
+      where: {
+        floor_id: { [Op.in]: sewingFloorIds },
+        date: { [Op.between]: [date_from, date_to] },
+      },
+      attributes: ['order_id', 'floor_id', 'date', 'fact_qty'],
+      raw: true,
+    });
+    const factByKey = {};
+    factRows.forEach((r) => {
+      const k = `${r.order_id}-${r.floor_id}`;
+      if (!factByKey[k]) factByKey[k] = [];
+      factByKey[k].push({ date: r.date, fact_qty: Number(r.fact_qty) || 0 });
+    });
 
     const statusByKey = {};
     const doneBatchByKey = {};
@@ -99,22 +273,18 @@ router.get('/board', async (req, res, next) => {
       });
     }
 
-    const planByKey = {};
-    const factByKey = {};
-    planDays.forEach((r) => {
-      const k = `${r.order_id}-${r.floor_id}`;
-      if (!planByKey[k]) planByKey[k] = [];
-      planByKey[k].push({ date: r.date, plan_qty: Number(r.planned_qty) || 0 });
-      if (!factByKey[k]) factByKey[k] = [];
-      factByKey[k].push({ date: r.date, fact_qty: Number(r.actual_qty) || 0 });
-    });
+    // Сортируем строки по дате внутри каждой ячейки
+    Object.keys(planByKey).forEach((k) => planByKey[k].sort((a, b) => a.date.localeCompare(b.date)));
+    Object.keys(factByKey).forEach((k) => factByKey[k].sort((a, b) => a.date.localeCompare(b.date)));
 
-    const itemsByFloor = { 2: [], 3: [], 4: [] };
+    const itemsByFloor = {};
+    sewingFloorIds.forEach((fid) => { itemsByFloor[fid] = []; });
     for (const key of keys) {
       const [orderIdStr, floorIdStr] = key.split('-');
       const order_id = parseInt(orderIdStr, 10);
       const floor_id = parseInt(floorIdStr, 10);
-      if (!SEWING_FLOOR_IDS.includes(floor_id)) continue;
+      if (!sewingFloorIds.includes(floor_id)) continue;
+      if (orderIdFilter != null && order_id !== orderIdFilter) continue;
       const status = statusByKey[key] || 'IN_PROGRESS';
       if (statusFilter !== 'ALL' && status !== statusFilter) continue;
       const order = orderMap[order_id];
@@ -138,6 +308,10 @@ router.get('/board', async (req, res, next) => {
       const fact_rows = factByKey[key] || [];
       const plan_sum = plan_rows.reduce((s, r) => s + r.plan_qty, 0);
       const fact_sum = fact_rows.reduce((s, r) => s + r.fact_qty, 0);
+      if (process.env.NODE_ENV !== 'production' && plan_sum === 0 && keys.has(key)) {
+        console.log('[sewing/board] план пустой при наличии ключа (разрыв цепочки?)', { key, order_id, floor_id });
+      }
+      if (!itemsByFloor[floor_id]) itemsByFloor[floor_id] = [];
       itemsByFloor[floor_id].push({
         order_id,
         order_title,
@@ -152,15 +326,17 @@ router.get('/board', async (req, res, next) => {
       });
     }
 
-    SEWING_FLOOR_IDS.forEach((fid) => {
-      itemsByFloor[fid].sort((a, b) => {
-        const da = a.order_deadline || '9999-12-31';
-        const db_ = b.order_deadline || '9999-12-31';
-        return da.localeCompare(db_) || (a.order_title || '').localeCompare(b.order_title || '');
-      });
+    sewingFloorIds.forEach((fid) => {
+      if (itemsByFloor[fid]) {
+        itemsByFloor[fid].sort((a, b) => {
+          const da = a.order_deadline || '9999-12-31';
+          const db_ = b.order_deadline || '9999-12-31';
+          return da.localeCompare(db_) || (a.order_title || '').localeCompare(b.order_title || '');
+        });
+      }
     });
 
-    const floors = SEWING_FLOOR_IDS.map((floor_id) => ({
+    const floors = sewingFloorIds.map((floor_id) => ({
       floor_id,
       items: itemsByFloor[floor_id],
     }));
@@ -178,6 +354,7 @@ router.get('/board', async (req, res, next) => {
  */
 router.get('/tasks', async (req, res, next) => {
   try {
+    const sewingFloorIds = await getSewingFloorIds();
     const today = new Date().toISOString().slice(0, 10);
     const weekStart = getMonday(today);
     const weekEnd = getSunday(today);
@@ -198,7 +375,7 @@ router.get('/tasks', async (req, res, next) => {
     };
     if (floor_id && floor_id !== 'all') {
       const fid = Number(floor_id);
-      if (fid >= 1 && fid <= 4) planWhere.floor_id = fid;
+      if (sewingFloorIds.includes(fid)) planWhere.floor_id = fid;
     }
     if (order_id) planWhere.order_id = order_id;
 
@@ -281,13 +458,12 @@ router.get('/tasks', async (req, res, next) => {
       });
     }
 
-    // Дополнительно: заказы с завершённым раскроем (статус «Готово») по этажам 2–4,
-    // которых ещё нет в плане — показываем в Пошиве, чтобы можно было ввести факт без предварительного планирования.
+    // Дополнительно: заказы с завершённым раскроем по производственным этажам, которых ещё нет в плане
     const seenOrderFloor = new Set(tasks.map((t) => `${t.order_id}-${t.floor_id ?? 'n'}`));
     const cuttingDone = await db.CuttingTask.findAll({
       where: {
         status: 'Готово',
-        floor: { [Op.in]: [2, 3, 4] },
+        floor: { [Op.in]: sewingFloorIds },
       },
       attributes: ['order_id', 'floor'],
       raw: true,
@@ -315,7 +491,7 @@ router.get('/tasks', async (req, res, next) => {
       const orderMap = {};
       orders.forEach((o) => { orderMap[o.id] = o; });
       const floors = await db.BuildingFloor.findAll({
-        where: { id: [2, 3, 4] },
+        where: { id: sewingFloorIds },
         attributes: ['id', 'name'],
       });
       const floorNameById = {};
@@ -402,19 +578,21 @@ router.get('/complete-status', async (req, res, next) => {
 
 /**
  * POST /api/sewing/complete
- * Завершить пошив: факт >= план, создать партию DONE, обновить sewing_order_floors.
- * Body: { order_id, floor_id, date_from?, date_to? }
+ * Единый поток: plan_sum из production_plan_day, fact_sum из sewing_fact; проверка fact_sum >= plan_sum, plan_sum > 0.
+ * Создаёт sewing_batches + sewing_batch_items, обновляет sewing_order_floors (done_batch_id). qc_batches не создаём — ОТК берёт pending по отсутствию qc_batches.
+ * Body: { order_id, floor_id }
  * Ответ: { ok: true, batch_id }
  */
 router.post('/complete', async (req, res, next) => {
   try {
-    const { order_id, floor_id, date_from, date_to } = req.body;
+    const sewingFloorIds = await getSewingFloorIds();
+    const { order_id, floor_id } = req.body;
     if (!order_id || floor_id == null || floor_id === '') {
       return res.status(400).json({ error: 'Укажите order_id и floor_id' });
     }
     const effectiveFloorId = Number(floor_id);
-    if (!SEWING_FLOOR_IDS.includes(effectiveFloorId)) {
-      return res.status(400).json({ error: 'Укажите этаж пошива (2, 3 или 4).' });
+    if (!sewingFloorIds.includes(effectiveFloorId)) {
+      return res.status(400).json({ error: 'Укажите этаж пошива (производственный этаж).' });
     }
 
     const order = await db.Order.findByPk(Number(order_id), {
@@ -422,20 +600,31 @@ router.post('/complete', async (req, res, next) => {
     });
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
-    // Суммируем план/факт по всем дням для этого заказа и этажа (не только за выбранный период)
-    const planRows = await db.ProductionPlanDay.findAll({
-      where: { order_id: Number(order_id), floor_id: effectiveFloorId },
-      attributes: ['planned_qty', 'actual_qty'],
-      raw: true,
-    });
-    const total_plan = planRows.reduce((s, r) => s + (Number(r.planned_qty) || 0), 0);
-    const total_fact = planRows.reduce((s, r) => s + (Number(r.actual_qty) || 0), 0);
+    // Суммы по заказу и этажу по всем датам (без фильтра по периоду), чтобы не было расхождения с сохранённым фактом
+    const [factAgg] = await db.sequelize.query(
+      `SELECT COALESCE(SUM(fact_qty), 0)::int AS fact_sum FROM sewing_fact WHERE order_id = :order_id AND floor_id = :floor_id`,
+      { replacements: { order_id: Number(order_id), floor_id: effectiveFloorId } }
+    );
+    const fact_sum = Number(factAgg?.[0]?.fact_sum) || 0;
 
-    if (total_fact < total_plan) {
-      return res.status(400).json({ error: 'Факт меньше плана. Завершение невозможно.' });
+    const [planAgg] = await db.sequelize.query(
+      `SELECT COALESCE(SUM(planned_qty), 0)::int AS plan_sum FROM production_plan_day WHERE order_id = :order_id AND floor_id = :floor_id`,
+      { replacements: { order_id: Number(order_id), floor_id: effectiveFloorId } }
+    );
+    const plan_sum = Number(planAgg?.[0]?.plan_sum) || 0;
+
+    if (plan_sum <= 0) {
+      return res.status(400).json({ error: 'Нет плана пошива по этому заказу и этажу. Добавьте план в Планировании.' });
     }
-    if (total_fact <= 0) {
-      return res.status(400).json({ error: 'Нет факта пошива. Введите факт по датам и нажмите «Сохранить факт».' });
+    if (fact_sum < plan_sum) {
+      return res.status(400).json({
+        error: `Факт (${fact_sum}) меньше плана (${plan_sum}). Нажмите «Как план и сохранить», затем «Завершить пошив → ОТК».`,
+      });
+    }
+    if (fact_sum <= 0) {
+      return res.status(400).json({
+        error: 'Нет факта пошива. Нажмите «Как план и сохранить», затем «Завершить пошив → ОТК».',
+      });
     }
 
     const existingDone = await db.SewingOrderFloor.findOne({
@@ -459,74 +648,41 @@ router.post('/complete', async (req, res, next) => {
           batch_code: batchCode,
           started_at: now,
           finished_at: now,
-          status: 'DONE',
+          status: 'READY_FOR_QC',
         },
         { transaction: t }
       );
 
-      const replacements = { order_id: Number(order_id), floor_id: effectiveFloorId };
-      let dateClause = '';
-      if (date_from && date_to) {
-        dateClause = ' AND date BETWEEN :date_from AND :date_to';
-        replacements.date_from = String(date_from).slice(0, 10);
-        replacements.date_to = String(date_to).slice(0, 10);
-      }
-      const [sizeRows] = await db.sequelize.query(
-        `SELECT model_size_id, SUM(fact_qty)::numeric AS fact_qty
-         FROM sewing_plans
-         WHERE order_id = :order_id AND floor_id = :floor_id ${dateClause}
-         GROUP BY model_size_id
-         HAVING SUM(fact_qty) > 0`,
-        { replacements, transaction: t }
-      );
-
-      if (sizeRows && sizeRows.length > 0) {
-        const modelSizeIds = [...new Set(sizeRows.map((r) => r.model_size_id))];
-        const modelSizes = await db.ModelSize.findAll({
-          where: { id: modelSizeIds },
+      // Одна запись в sewing_batch_items с общим количеством (fact_sum). model_size_id нужен для ОТК.
+      let model_size_id = null;
+      if (order.model_id) {
+        const firstSize = await db.ModelSize.findOne({
+          where: { model_id: order.model_id },
           attributes: ['id', 'size_id'],
-          raw: true,
         });
-        const sizeIdByModel = {};
-        modelSizes.forEach((ms) => { sizeIdByModel[ms.id] = ms.size_id || null; });
-        for (const row of sizeRows) {
-          const factQty = Number(row.fact_qty) || 0;
-          if (factQty <= 0) continue;
-          await db.SewingBatchItem.create(
-            {
-              batch_id: batch.id,
-              model_size_id: row.model_size_id,
-              size_id: sizeIdByModel[row.model_size_id] ?? null,
-              planned_qty: 0,
-              fact_qty: factQty,
-            },
-            { transaction: t }
-          );
-        }
-      } else {
-        let model_size_id = null;
-        if (order.model_id) {
-          const firstSize = await db.ModelSize.findOne({
-            where: { model_id: order.model_id },
-            attributes: ['id'],
-          });
-          if (firstSize) model_size_id = firstSize.id;
-        }
-        if (model_size_id == null) {
-          const anySize = await db.ModelSize.findOne({ attributes: ['id'], order: [['id']] });
-          if (anySize) model_size_id = anySize.id;
-        }
-        await db.SewingBatchItem.create(
-          {
-            batch_id: batch.id,
-            model_size_id,
-            size_id: null,
-            planned_qty: total_plan,
-            fact_qty: total_fact,
-          },
-          { transaction: t }
-        );
+        if (firstSize) model_size_id = firstSize.id;
       }
+      if (model_size_id == null) {
+        const anySize = await db.ModelSize.findOne({ attributes: ['id', 'size_id'], order: [['id']] });
+        if (anySize) model_size_id = anySize.id;
+      }
+      if (model_size_id == null) {
+        await t.rollback();
+        return res.status(400).json({
+          error: 'В справочнике нет размеров модели. Добавьте модель и размеры (Склад → Модели изделий), затем завершите пошив снова.',
+        });
+      }
+      const sizeId = (await db.ModelSize.findByPk(model_size_id, { attributes: ['size_id'], raw: true }))?.size_id ?? null;
+      await db.SewingBatchItem.create(
+        {
+          batch_id: batch.id,
+          model_size_id,
+          size_id: sizeId,
+          planned_qty: plan_sum,
+          fact_qty: fact_sum,
+        },
+        { transaction: t }
+      );
 
       await db.SewingOrderFloor.upsert(
         {
@@ -539,6 +695,12 @@ router.post('/complete', async (req, res, next) => {
         { transaction: t, conflictFields: ['order_id', 'floor_id'] }
       );
 
+      // Единый пайплайн: пошив DONE → ОТК IN_PROGRESS
+      const sewingStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'sewing' }, transaction: t });
+      if (sewingStage) await sewingStage.update({ status: 'DONE', completed_at: now }, { transaction: t });
+      const qcStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'qc' }, transaction: t });
+      if (qcStage) await qcStage.update({ status: 'IN_PROGRESS', started_at: now }, { transaction: t });
+
       await t.commit();
       res.json({ ok: true, batch_id: batch.id });
     } catch (err) {
@@ -549,5 +711,7 @@ router.post('/complete', async (req, res, next) => {
     next(err);
   }
 });
+
+// POST /api/sewing/ensure-batch удалён: партия создаётся только через POST /api/sewing/complete (факт из sewing_fact).
 
 module.exports = router;

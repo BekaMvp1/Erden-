@@ -20,7 +20,8 @@ const procurementRoutes = require("./routes/procurement");
 const cuttingRoutes = require("./routes/cutting");
 const warehouseRoutes = require("./routes/warehouse");
 const warehouseStockRoutes = require("./routes/warehouseStock");
-const sewingPlansRoutes = require("./routes/sewingPlans");
+// sewingPlans отключён: единая цепочка через production_plan_day + sewing_fact + sewing_batches
+// const sewingPlansRoutes = require("./routes/sewingPlans");
 const planningRoutes = require("./routes/planning");
 const orderOperationsRoutes = require("./routes/orderOperations");
 const reportsRoutes = require("./routes/reports");
@@ -173,13 +174,8 @@ app.use(
   technologistFloorOnly,
   warehouseStockRoutes,
 );
-app.use(
-  "/api/sewing-plans",
-  authenticate,
-  requireRole("admin", "manager", "technologist"),
-  technologistFloorOnly,
-  sewingPlansRoutes,
-);
+// Роуты sewing-plans отключены (дублировали логику; цепочка: Планирование → production_plan_day → Пошив → sewing_batches → ОТК)
+// app.use("/api/sewing-plans", authenticate, requireRole("admin", "manager", "technologist"), technologistFloorOnly, sewingPlansRoutes);
 app.use(
   "/api/planning",
   authenticate,

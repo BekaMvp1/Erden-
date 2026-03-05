@@ -53,9 +53,10 @@ const STAGE_INDICATOR = {
   NOT_STARTED: { icon: '○', className: 'text-slate-500' },
 };
 
-// Порядок этапов соответствует производственной цепочке: Закуп → Раскрой → Пошив → ОТК → Склад → Отгрузка
+// Производственная цепочка: Закуп → Планирование → Раскрой → Пошив → ОТК → Склад → Отгрузка
 const STAGE_COLUMNS = [
   { key: 'procurement', title: 'ЗАКУП' },
+  { key: 'planning', title: 'ПЛАНИРОВАНИЕ' },
   { key: 'cutting', title: 'РАСКРОЙ' },
   { key: 'sewing', title: 'ПОШИВ' },
   { key: 'qc', title: 'ОТК' },
@@ -72,9 +73,9 @@ const COL_WIDTHS = {
   deadline: 140,
 };
 
-const GRID_TEMPLATE = `${COL_WIDTHS.client}px ${COL_WIDTHS.priority}px ${COL_WIDTHS.created}px repeat(6, ${COL_WIDTHS.stage}px) ${COL_WIDTHS.forecast}px ${COL_WIDTHS.deadline}px`;
+const GRID_TEMPLATE = `${COL_WIDTHS.client}px ${COL_WIDTHS.priority}px ${COL_WIDTHS.created}px repeat(${STAGE_COLUMNS.length}, ${COL_WIDTHS.stage}px) ${COL_WIDTHS.forecast}px ${COL_WIDTHS.deadline}px`;
 const GRID_MIN_WIDTH = COL_WIDTHS.client + COL_WIDTHS.priority + COL_WIDTHS.created + STAGE_COLUMNS.length * COL_WIDTHS.stage + COL_WIDTHS.forecast + COL_WIDTHS.deadline;
-const UNIFIED_BOX_CLASS = 'm-1 h-[96px] rounded-lg border border-white/15 bg-slate-900/45 p-2';
+const UNIFIED_BOX_CLASS = 'm-1 min-h-[100px] rounded-lg border border-white/15 bg-slate-900/45 p-2.5 text-sm';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -113,6 +114,8 @@ function getStageUrl(orderId, stageKey) {
   switch (stageKey) {
     case 'procurement':
       return `/procurement?order_id=${orderId}`;
+    case 'planning':
+      return `/planning?order_id=${orderId}`;
     case 'cutting':
       return `/cutting?order_id=${orderId}`;
     case 'sewing':
@@ -150,10 +153,21 @@ function calcFilterCounters(orders) {
  * Ячейка этапа: заполняет ячейку до краёв, единый шаблон, подсветка по статусу (DONE / IN_PROGRESS / NOT_STARTED).
  */
 function StageCell({ stage, viewMode, orderId, onOpenStage }) {
-  const hasSchedule = (stage.planned_days || 0) > 0 && stage.planned_start_date;
+  const hasActual =
+    (stage.actual_days != null && stage.actual_days >= 0) || stage.actual_start_date || stage.actual_end_date;
+  const hasPlanned = (stage.planned_days || 0) > 0 && stage.planned_start_date;
+  const hasSchedule = hasActual || hasPlanned;
   const statusClass = STATUS_STYLE[stage.status] || STATUS_STYLE.NOT_STARTED;
   const isDone = stage.status === 'DONE';
   const isProgress = stage.status === 'IN_PROGRESS';
+
+  const daysLabel = hasActual && stage.actual_days != null
+    ? formatDaysLabel(stage.actual_days)
+    : hasPlanned
+      ? formatDaysLabel(stage.planned_days)
+      : '—';
+  const startDate = stage.actual_start_date || stage.planned_start_date;
+  const endDate = stage.actual_end_date || stage.planned_end_date;
 
   return (
     <button
@@ -172,9 +186,9 @@ function StageCell({ stage, viewMode, orderId, onOpenStage }) {
       </div>
       {viewMode === 'schedule' ? (
         <div className="mt-0.5 space-y-0.5 flex-1 min-h-0">
-          <div className="text-xs font-semibold leading-tight">{hasSchedule ? formatDaysLabel(stage.planned_days) : '—'}</div>
-          <div className="text-[10px] leading-tight opacity-90">{hasSchedule ? formatDate(stage.planned_start_date) : '—'}</div>
-          <div className="text-[10px] leading-tight opacity-90">{hasSchedule ? formatDate(stage.planned_end_date) : '—'}</div>
+          <div className="text-xs font-semibold leading-tight">{daysLabel}</div>
+          <div className="text-[10px] leading-tight opacity-90">{hasSchedule && startDate ? formatDate(startDate) : '—'}</div>
+          <div className="text-[10px] leading-tight opacity-90">{hasSchedule && endDate ? formatDate(endDate) : '—'}</div>
         </div>
       ) : (
         <div className="mt-1 flex-1 min-h-0 flex flex-col justify-center">

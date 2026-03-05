@@ -92,11 +92,6 @@ export default function OrderDetails() {
   const [planModelLoading, setPlanModelLoading] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [procurement, setProcurement] = useState(null);
-  const [rostovkaEditOpen, setRostovkaEditOpen] = useState(false);
-  const [rostovkaItems, setRostovkaItems] = useState([]);
-  const [rostovkaSizes, setRostovkaSizes] = useState([]);
-  const [rostovkaSaving, setRostovkaSaving] = useState(false);
-  const [rostovkaError, setRostovkaError] = useState('');
   const editColorInputRef = useRef(null);
   const editColorDropdownRef = useRef(null);
 
@@ -826,82 +821,6 @@ export default function OrderDetails() {
                 );
               })()}
 
-              {/* Ростовка (размерная матрица по справочнику размеров) */}
-              <div className="mt-6 pt-4 border-t border-white/15 dark:border-white/15">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <p className="text-sm font-medium text-[#ECECEC] dark:text-dark-text/90">Ростовка</p>
-                  {canEditOrder(user) && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setRostovkaError('');
-                        try {
-                          const [rostovkaRes, sizesRes] = await Promise.all([
-                            api.orders.getRostovka(order.id),
-                            api.sizes.list(),
-                          ]);
-                          setRostovkaSizes(sizesRes || []);
-                          const bySize = {};
-                          (rostovkaRes?.items || order.OrderRostovkas || []).forEach((r) => {
-                            bySize[r.size_id ?? r.Size?.id] = Number(r.planned_qty) || 0;
-                          });
-                          setRostovkaItems(
-                            (sizesRes || []).map((s) => ({
-                              size_id: s.id,
-                              code: s.code || s.name,
-                              planned_qty: bySize[s.id] ?? 0,
-                            }))
-                          );
-                          setRostovkaEditOpen(true);
-                        } catch (e) {
-                          setRostovkaError(e.message || 'Ошибка загрузки');
-                        }
-                      }}
-                      className="text-sm text-primary-400 hover:underline"
-                    >
-                      Редактировать
-                    </button>
-                  )}
-                </div>
-                {(() => {
-                  const rows = order.OrderRostovkas || [];
-                  const total = rows.reduce((s, r) => s + Number(r.planned_qty || 0), 0);
-                  const orderQty = order.total_quantity ?? order.quantity ?? 0;
-                  if (rows.length === 0) {
-                    return (
-                      <p className="text-sm text-amber-400/90 dark:text-amber-400/90">
-                        Ростовка не заполнена
-                      </p>
-                    );
-                  }
-                  return (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm border-collapse">
-                        <thead>
-                          <tr className="border-b border-white/20">
-                            <th className="text-left px-3 py-2 font-medium text-[#ECECEC] dark:text-dark-text/90">Размер</th>
-                            <th className="text-right px-3 py-2 font-medium text-[#ECECEC] dark:text-dark-text/90">Количество</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((r) => (
-                            <tr key={r.id || r.size_id} className="border-b border-white/15">
-                              <td className="px-3 py-2 text-[#ECECEC] dark:text-dark-text">{r.Size?.code ?? r.Size?.name ?? r.size_id}</td>
-                              <td className="px-3 py-2 text-right">{r.planned_qty ?? 0}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="border-b border-white/20 font-medium">
-                            <td className="px-3 py-2 text-[#ECECEC] dark:text-dark-text">Итого</td>
-                            <td className="px-3 py-2 text-right">{total} / {orderQty}</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  );
-                })()}
-              </div>
             </div>
           </div>
         </div>
@@ -1793,90 +1712,6 @@ export default function OrderDetails() {
                 className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-medium hover:bg-red-500"
               >
                 Удалить
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {rostovkaEditOpen && order && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto" onClick={() => !rostovkaSaving && setRostovkaEditOpen(false)}>
-          <div className="bg-neon-bg2 dark:bg-dark-900 rounded-xl p-4 sm:p-6 max-w-md w-full border border-neon-border dark:border-white/25 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold text-neon-text dark:text-dark-text mb-2">Ростовка</h2>
-            <p className="text-sm text-neon-muted dark:text-dark-text/70 mb-4">
-              Сумма по размерам должна равняться количеству заказа: <strong>{order.total_quantity ?? order.quantity}</strong>
-            </p>
-            <div className="overflow-x-auto max-h-80 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-white/20">
-                    <th className="text-left py-2 text-neon-muted">Размер</th>
-                    <th className="text-right py-2 text-neon-muted">Количество</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rostovkaItems.map((it) => (
-                    <tr key={it.size_id} className="border-b border-white/10">
-                      <td className="py-2 text-neon-text">{it.code}</td>
-                      <td className="py-2 text-right">
-                        <input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={it.planned_qty}
-                          onChange={(e) => {
-                            const v = parseInt(e.target.value, 10);
-                            setRostovkaItems((prev) =>
-                              prev.map((x) => (x.size_id === it.size_id ? { ...x, planned_qty: Number.isNaN(v) ? 0 : Math.max(0, v) } : x))
-                            );
-                          }}
-                          className="w-20 text-right px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-neon-text"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-sm mt-2 text-neon-muted">
-              Итого: {rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0)} / {order.total_quantity ?? order.quantity}
-              {rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0) !== (order.total_quantity ?? order.quantity) && (
-                <span className="text-red-400 ml-2">Сумма должна равняться количеству заказа</span>
-              )}
-            </p>
-            {rostovkaError && <p className="text-sm text-red-400 mt-2">{rostovkaError}</p>}
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                disabled={rostovkaSaving}
-                onClick={async () => {
-                  const total = rostovkaItems.reduce((s, i) => s + (Number(i.planned_qty) || 0), 0);
-                  const orderQty = order.total_quantity ?? order.quantity ?? 0;
-                  if (total !== orderQty) {
-                    setRostovkaError(`Сумма (${total}) должна равняться количеству заказа (${orderQty})`);
-                    return;
-                  }
-                  setRostovkaSaving(true);
-                  setRostovkaError('');
-                  try {
-                    await api.orders.saveRostovka(order.id, {
-                      items: rostovkaItems.filter((i) => (Number(i.planned_qty) || 0) > 0).map((i) => ({ size_id: i.size_id, planned_qty: i.planned_qty })),
-                    });
-                    loadOrder();
-                    setRostovkaEditOpen(false);
-                  } catch (e) {
-                    setRostovkaError(e.message || 'Ошибка сохранения');
-                  } finally {
-                    setRostovkaSaving(false);
-                  }
-                }}
-                className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                {rostovkaSaving ? 'Сохранение...' : 'Сохранить'}
-              </button>
-              <button type="button" onClick={() => !rostovkaSaving && setRostovkaEditOpen(false)} className="px-4 py-2 rounded-lg bg-accent-1/30 text-neon-text" disabled={rostovkaSaving}>
-                Отмена
               </button>
             </div>
           </div>

@@ -8,6 +8,7 @@ const db = require('../models');
 const { logAudit } = require('../utils/audit');
 const { trySyncOrderToCloud, queueOrderForSync } = require('../services/cloudSync');
 const { STAGES, DEFAULT_STAGE_DAYS } = require('../constants/boardStages');
+const { PIPELINE_STAGES, PIPELINE_DISPLAY } = require('../constants/pipelineStages');
 const { normalizeSizeCode, findSizeIdByCode } = require('../utils/sizeNormalize');
 
 const router = express.Router();
@@ -346,6 +347,22 @@ router.post('/', async (req, res, next) => {
         currentDate = plannedEndDate ? addDaysToIso(plannedEndDate, 1) : currentDate;
       }
 
+      // Производственная цепочка: Закуп → Планирование → Раскрой → Пошив → ОТК → Склад → Отгрузка
+      const now = new Date();
+      for (const stageKey of PIPELINE_STAGES) {
+        await db.OrderStage.create(
+          {
+            order_id: order.id,
+            stage_key: stageKey,
+            status: stageKey === 'procurement' ? 'IN_PROGRESS' : 'NOT_STARTED',
+            started_at: stageKey === 'procurement' ? now : null,
+            completed_at: null,
+            meta: null,
+          },
+          { transaction: t }
+        );
+      }
+
       await t.commit();
     } catch (err) {
       await t.rollback();
@@ -485,6 +502,72 @@ router.get('/by-workshop', async (req, res, next) => {
       client_name: o.Client?.name || '—',
     }));
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/orders/:id/stages
+ * Статусы этапов пайплайна заказа (источник истины: order_stages).
+ * Если записей нет (старые заказы) — создаём с procurement IN_PROGRESS и возвращаем.
+ */
+router.get('/:id/stages', async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    let stages = await db.OrderStage.findAll({
+      where: { order_id: orderId },
+      attributes: ['id', 'order_id', 'stage_key', 'status', 'started_at', 'completed_at', 'meta'],
+      raw: true,
+    });
+
+    if (!stages || stages.length === 0) {
+      const order = await db.Order.findByPk(orderId);
+      if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+      const now = new Date();
+      for (const stageKey of PIPELINE_STAGES) {
+        await db.OrderStage.create({
+          order_id: orderId,
+          stage_key: stageKey,
+          status: stageKey === 'procurement' ? 'IN_PROGRESS' : 'NOT_STARTED',
+          started_at: stageKey === 'procurement' ? now : null,
+          completed_at: null,
+          meta: null,
+        });
+      }
+      stages = await db.OrderStage.findAll({
+        where: { order_id: orderId },
+        attributes: ['id', 'order_id', 'stage_key', 'status', 'started_at', 'completed_at', 'meta'],
+        raw: true,
+      });
+    }
+
+    // Дозаполнить этап planning для старых заказов (если его не было)
+    const hasPlanning = stages.some((s) => s.stage_key === 'planning');
+    if (!hasPlanning) {
+      await db.OrderStage.create({
+        order_id: orderId,
+        stage_key: 'planning',
+        status: 'NOT_STARTED',
+        started_at: null,
+        completed_at: null,
+        meta: null,
+      });
+      stages = await db.OrderStage.findAll({
+        where: { order_id: orderId },
+        attributes: ['id', 'order_id', 'stage_key', 'status', 'started_at', 'completed_at', 'meta'],
+        raw: true,
+      });
+    }
+
+    // Порядок: Закуп → Планирование → Раскрой → Пошив → ОТК → Склад → Отгрузка
+    const orderByKey = {};
+    PIPELINE_DISPLAY.forEach((p, i) => { orderByKey[p.key] = i; });
+    stages.sort((a, b) => (orderByKey[a.stage_key] ?? 99) - (orderByKey[b.stage_key] ?? 99));
+
+    res.json(stages);
   } catch (err) {
     next(err);
   }
@@ -917,12 +1000,96 @@ router.post('/:id/procurement/complete', async (req, res, next) => {
       }
     }
 
+    // Цепочка: закуп DONE → планирование IN_PROGRESS
+    const now = new Date();
+    const procStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'procurement' }, transaction: t });
+    if (procStage) {
+      await procStage.update({ status: 'DONE', completed_at: now }, { transaction: t });
+    }
+    const planStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'planning' }, transaction: t });
+    if (planStage) {
+      await planStage.update({ status: 'IN_PROGRESS', started_at: now }, { transaction: t });
+    }
+
     await t.commit();
     await logAudit(req.user.id, 'UPDATE', 'procurement_request', pr.id);
 
     return res.json({ ok: true, status: 'received' });
   } catch (err) {
     await t.rollback().catch(() => {});
+    next(err);
+  }
+});
+
+/**
+ * POST /api/orders/:id/planning/complete
+ * Завершить планирование: проверка что production_plan_day заполнен, planning = DONE, cutting = IN_PROGRESS.
+ */
+router.post('/:id/planning/complete', async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    if (!['admin', 'manager', 'technologist'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Только admin/manager/technologist могут завершить планирование' });
+    }
+
+    const order = await db.Order.findByPk(orderId);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    const planStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'planning' } });
+    if (!planStage) return res.status(400).json({ error: 'Этап планирования не найден. Обновите этапы заказа.' });
+    if (planStage.status !== 'IN_PROGRESS') {
+      return res.status(400).json({ error: 'Планирование можно завершить только когда этап в статусе В работе' });
+    }
+
+    const planCount = await db.ProductionPlanDay.count({ where: { order_id: orderId }, col: 'id' });
+    if (planCount === 0) {
+      return res.status(400).json({
+        error: 'Нет плана в Планировании. Заполните production_plan_day по заказу и нажмите «Завершить планирование».',
+      });
+    }
+
+    const now = new Date();
+    await planStage.update({ status: 'DONE', completed_at: now });
+    const cutStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'cutting' } });
+    if (cutStage) await cutStage.update({ status: 'IN_PROGRESS', started_at: now });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/orders/:id/warehouse/complete
+ * Завершить этап Склад: warehouse = DONE, shipping = IN_PROGRESS.
+ */
+router.post('/:id/warehouse/complete', async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!orderId) return res.status(400).json({ error: 'Некорректный id заказа' });
+
+    if (!['admin', 'manager', 'technologist'].includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Только admin/manager/technologist могут завершить этап Склад' });
+    }
+
+    const order = await db.Order.findByPk(orderId);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    const whStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'warehouse' } });
+    if (!whStage) return res.status(400).json({ error: 'Этап склад не найден' });
+    if (whStage.status !== 'IN_PROGRESS') {
+      return res.status(400).json({ error: 'Склад можно завершить только когда этап в статусе В работе' });
+    }
+
+    const now = new Date();
+    await whStage.update({ status: 'DONE', completed_at: now });
+    const shipStage = await db.OrderStage.findOne({ where: { order_id: orderId, stage_key: 'shipping' } });
+    if (shipStage) await shipStage.update({ status: 'IN_PROGRESS', started_at: now });
+
+    return res.json({ ok: true });
+  } catch (err) {
     next(err);
   }
 });

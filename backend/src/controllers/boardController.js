@@ -5,8 +5,9 @@
 const { Op } = require('sequelize');
 const db = require('../models');
 const { STAGES } = require('../constants/boardStages');
+const { PIPELINE_DISPLAY } = require('../constants/pipelineStages');
 
-const STAGE_KEY_SET = new Set(STAGES.map((s) => s.key));
+const STAGE_KEY_SET = new Set([...STAGES.map((s) => s.key), 'planning']);
 
 function getTodayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -68,6 +69,15 @@ function parseBool(value, fallback) {
   return String(value).toLowerCase() === 'true';
 }
 
+/** Длительность в днях между двумя датами (для отображения «заняло N дней») */
+function daysBetween(startDate, endDate) {
+  if (!startDate || !endDate) return null;
+  const start = new Date(String(startDate).slice(0, 10));
+  const end = new Date(String(endDate).slice(0, 10));
+  const diff = Math.round((end - start) / (24 * 60 * 60 * 1000));
+  return diff >= 0 ? diff : null;
+}
+
 function mapStageOutput(stage, isOverdue) {
   const percent = calcPercent(stage.actual_qty, stage.planned_qty);
   return {
@@ -82,6 +92,7 @@ function mapStageOutput(stage, isOverdue) {
     planned_end_date: toDateOnly(stage.planned_end_date),
     actual_start_date: toDateOnly(stage.actual_start_date),
     actual_end_date: toDateOnly(stage.actual_end_date),
+    actual_days: stage.actual_days != null ? stage.actual_days : null,
   };
 }
 
@@ -160,7 +171,39 @@ async function getBoardOrders(req, res, next) {
     });
 
     const orderIds = orders.map((o) => o.id);
-    // Индикаторы этапов производства для панели: Закуп, Раскрой, Пошив, ОТК, Склад, Отгрузка
+    // Источник истины по этапам — order_stages (статус и даты для отображения длительности)
+    const orderStagesRows = orderIds.length > 0
+      ? await db.OrderStage.findAll({
+          where: { order_id: orderIds },
+          attributes: ['order_id', 'stage_key', 'status', 'started_at', 'completed_at'],
+          raw: true,
+        })
+      : [];
+    const stagesByOrderId = {};
+    orderStagesRows.forEach((r) => {
+      if (!stagesByOrderId[r.order_id]) stagesByOrderId[r.order_id] = [];
+      stagesByOrderId[r.order_id].push({
+        stage_key: r.stage_key,
+        status: r.status,
+        started_at: r.started_at,
+        completed_at: r.completed_at,
+      });
+    });
+
+    // Количество записей плана по заказам (для fallback статуса «Планирование»)
+    let planCountByOrderId = {};
+    if (orderIds.length > 0) {
+      const planCounts = await db.ProductionPlanDay.findAll({
+        where: { order_id: orderIds },
+        attributes: ['order_id'],
+        raw: true,
+      });
+      planCounts.forEach((r) => {
+        planCountByOrderId[r.order_id] = (planCountByOrderId[r.order_id] || 0) + 1;
+      });
+    }
+
+    // Индикаторы этапов производства для панели (резерв для старых данных, если order_stages пуст)
     const cuttingByOrder = {};
     const sewingByOrder = {};
     const qcByOrder = {};
@@ -228,9 +271,10 @@ async function getBoardOrders(req, res, next) {
     const prepared = [];
     for (const orderRow of orders) {
       const plain = orderRow.get ? orderRow.get({ plain: true }) : orderRow;
-      const baseStages = STAGES.map((stage) => ({
-        stage_key: stage.key,
-        title_ru: stage.title_ru,
+      // Семь этапов цепочки: Закуп → Планирование → Раскрой → Пошив → ОТК → Склад → Отгрузка
+      const baseStages = PIPELINE_DISPLAY.map((p) => ({
+        stage_key: p.key,
+        title_ru: p.title_ru,
         planned_qty: 0,
         actual_qty: 0,
         planned_days: 0,
@@ -278,25 +322,56 @@ async function getBoardOrders(req, res, next) {
 
       const deadline = toDateOnly(plain.deadline);
       const computedPriority = getPriorityFromDeadline(deadline, todayIso);
-      const preStages = STAGES.map((s) => stageMap.get(s.key));
+      const preStages = PIPELINE_DISPLAY.map((p) => stageMap.get(p.key));
       const doneByStatus = String(plain.OrderStatus?.name || '').toLowerCase().includes('готов');
       const isOverdue = !!(deadline && deadline < todayIso);
       const stagesOut = preStages.map((stage) => mapStageOutput(stage, isOverdue));
 
-      // Этап «Закуп»: статус из procurement_requests (draft→NOT_STARTED, sent→IN_PROGRESS, received→DONE)
+      // Источник истины по этапам — order_stages: статус, даты, длительность в днях
+      const osStages = stagesByOrderId[plain.id] || [];
+      const getOsStage = (stageKey) => osStages.find((s) => s.stage_key === stageKey);
+      stagesOut.forEach((s) => {
+        const os = getOsStage(s.stage_key);
+        if (os) {
+          s.status = os.status;
+          if (os.started_at) s.actual_start_date = toDateOnly(os.started_at);
+          if (os.completed_at) s.actual_end_date = toDateOnly(os.completed_at);
+          if (os.started_at && os.completed_at) {
+            const days = daysBetween(os.started_at, os.completed_at);
+            if (days != null) s.actual_days = days;
+          }
+        }
+      });
+
+      // Fallback: если в order_stages нет записи (старые заказы), определяем статус по фактическим данным
+      const procStageOut = stagesOut.find((s) => s.stage_key === 'procurement');
+      const planStageOut = stagesOut.find((s) => s.stage_key === 'planning');
+      const cutStageOut = stagesOut.find((s) => s.stage_key === 'cutting');
+      const sewStageOut = stagesOut.find((s) => s.stage_key === 'sewing');
+      if (procStageOut && !getOsStage('procurement')) {
+        const pr = plain.ProcurementRequest;
+        if (pr && String(pr.status || '').toLowerCase() === 'received') procStageOut.status = 'DONE';
+      }
+      if (planStageOut && !getOsStage('planning')) {
+        const planCount = planCountByOrderId[plain.id] || 0;
+        if (planCount > 0) planStageOut.status = 'DONE';
+      }
+      if (cutStageOut && !getOsStage('cutting')) {
+        const cut = cuttingByOrder[plain.id];
+        if (cut && cut.hasAny && cut.allDone) cutStageOut.status = 'DONE';
+      }
+      if (sewStageOut && !getOsStage('sewing')) {
+        const sew = sewingByOrder[plain.id];
+        if (sew === 'DONE') sewStageOut.status = 'DONE';
+        else if (sew === 'IN_PROGRESS') sewStageOut.status = 'IN_PROGRESS';
+      }
+
+      // Дополнительно: закуп — actual_qty из заказа при DONE
       const pr = plain.ProcurementRequest;
       const procStage = stagesOut.find((s) => s.stage_key === 'procurement');
-      if (procStage && pr) {
-        const prStatus = String(pr.status || '').toLowerCase();
-        if (prStatus === 'received') {
-          procStage.status = 'DONE';
-          procStage.actual_qty = Number(plain.total_quantity ?? plain.quantity ?? 0) || procStage.actual_qty;
-          procStage.percent = 100;
-        } else if (prStatus === 'sent') {
-          procStage.status = isOverdue ? 'OVERDUE' : 'IN_PROGRESS';
-        } else {
-          procStage.status = isOverdue ? 'OVERDUE' : 'NOT_STARTED';
-        }
+      if (procStage && pr && procStage.status === 'DONE') {
+        procStage.actual_qty = Number(plain.total_quantity ?? plain.quantity ?? 0) || procStage.actual_qty;
+        procStage.percent = 100;
       }
 
       const done = doneByStatus || isShippingDone(stagesOut);
@@ -310,32 +385,15 @@ async function getBoardOrders(req, res, next) {
       const shippingStage = preStages.find((s) => s.stage_key === 'shipping');
       const forecastDate = toDateOnly(shippingStage?.planned_end_date) || null;
 
-      // Индикаторы этапов для линии под названием заказа (Закуп → Раскрой → Пошив → ОТК → Склад → Отгрузка)
-      let procurementStatus = 'NOT_STARTED';
-      if (pr) {
-        const prStatus = String(pr.status || '').toLowerCase();
-        if (prStatus === 'received') procurementStatus = 'DONE';
-        else if (prStatus === 'sent' || prStatus === 'draft') procurementStatus = 'IN_PROGRESS';
-      }
-      const cuttingStat = cuttingByOrder[plain.id];
-      const cuttingStatus = !cuttingStat ? 'NOT_STARTED' : cuttingStat.allDone ? 'DONE' : cuttingStat.hasAny ? 'IN_PROGRESS' : 'NOT_STARTED';
-      const sewingStatus = sewingByOrder[plain.id] || 'NOT_STARTED';
-      let qcStatus = 'NOT_STARTED';
-      const qcStat = qcByOrder[plain.id];
-      if (qcStat) {
-        if (qcStat.hasQc) qcStatus = 'DONE';
-        else if (qcStat.hasDoneBatch) qcStatus = 'IN_PROGRESS';
-      }
-      const warehouseStatus = warehouseByOrder[plain.id] ? 'DONE' : 'NOT_STARTED';
-      const shippingStatus = shippingByOrder[plain.id] ? 'DONE' : 'NOT_STARTED';
-
+      // Индикаторы этапов: Закуп → Планирование → Раскрой → Пошив → ОТК → Склад → Отгрузка
       const production_stages = [
-        { key: 'procurement', label: 'Закуп', status: procurementStatus },
-        { key: 'cutting', label: 'Раскрой', status: cuttingStatus },
-        { key: 'sewing', label: 'Пошив', status: sewingStatus },
-        { key: 'qc', label: 'ОТК', status: qcStatus },
-        { key: 'warehouse', label: 'Склад', status: warehouseStatus },
-        { key: 'shipping', label: 'Отгрузка', status: shippingStatus },
+        { key: 'procurement', label: 'Закуп', status: getOsStage('procurement')?.status || 'NOT_STARTED' },
+        { key: 'planning', label: 'Планирование', status: getOsStage('planning')?.status || 'NOT_STARTED' },
+        { key: 'cutting', label: 'Раскрой', status: getOsStage('cutting')?.status || 'NOT_STARTED' },
+        { key: 'sewing', label: 'Пошив', status: getOsStage('sewing')?.status || 'NOT_STARTED' },
+        { key: 'qc', label: 'ОТК', status: getOsStage('qc')?.status || 'NOT_STARTED' },
+        { key: 'warehouse', label: 'Склад', status: getOsStage('warehouse')?.status || 'NOT_STARTED' },
+        { key: 'shipping', label: 'Отгрузка', status: getOsStage('shipping')?.status || 'NOT_STARTED' },
       ];
 
       prepared.push({

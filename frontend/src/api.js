@@ -38,6 +38,8 @@ async function request(path, options = {}) {
     err.status = res.status;
     err.details = data.stack || data.details;
     err.problematic = data.problematic;
+    err.received = data.received; // для 400 от /fact/bulk и др.
+    err.error = data.error; // текст ошибки с бэкенда (например /sewing/complete)
     throw err;
   }
 
@@ -64,6 +66,7 @@ export const api = {
       return request(`/api/orders${q ? `?${q}` : ''}`);
     },
     get: (id) => request(`/api/orders/${id}`),
+    stages: (id) => request(`/api/orders/${id}/stages`),
     create: (data) =>
       request('/api/orders', { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) =>
@@ -85,6 +88,12 @@ export const api = {
       request(`/api/orders/${id}/photos/${index}`, { method: 'DELETE' }),
     getProcurement: (id) =>
       request(`/api/orders/${id}/procurement`),
+    completeProcurement: (id, items) =>
+      request(`/api/orders/${id}/procurement/complete`, { method: 'POST', body: JSON.stringify({ items: items || [] }) }),
+    completePlanning: (id) =>
+      request(`/api/orders/${id}/planning/complete`, { method: 'POST' }),
+    completeWarehouse: (id) =>
+      request(`/api/orders/${id}/warehouse/complete`, { method: 'POST' }),
     saveProcurementPlan: (id, data) =>
       request(`/api/orders/${id}/procurement/plan`, {
         method: 'PUT',
@@ -92,12 +101,6 @@ export const api = {
       }),
     deleteProcurement: (id) =>
       request(`/api/orders/${id}/procurement`, { method: 'DELETE' }),
-    getRostovka: (id) => request(`/api/orders/${id}/rostovka`),
-    saveRostovka: (id, data) =>
-      request(`/api/orders/${id}/rostovka`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
   },
   planning: {
     updateOperation: (id, data) =>
@@ -225,8 +228,17 @@ export const api = {
       const q = new URLSearchParams(params).toString();
       return request(`/api/sewing/complete-status${q ? `?${q}` : ''}`);
     },
+    planDates: (params) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/sewing/plan-dates${q ? `?${q}` : ''}`);
+    },
+    saveFact: (body) =>
+      request('/api/sewing/fact', { method: 'PUT', body: JSON.stringify(body) }),
+    saveFactBulk: (body) =>
+      request('/api/sewing/fact/bulk', { method: 'POST', body: JSON.stringify(body) }),
     complete: (body) =>
       request('/api/sewing/complete', { method: 'POST', body: JSON.stringify(body) }),
+    // ensure-batch удалён: партия создаётся только через complete (Завершить пошив → ОТК)
   },
   reports: {
     daily: (date) => request(`/api/reports/daily?date=${date}`),
@@ -328,6 +340,10 @@ export const api = {
       }),
     deleteTask: (id) =>
       request(`/api/cutting/tasks/${id}`, { method: 'DELETE' }),
+    complete: (data) =>
+      request('/api/cutting/complete', { method: 'POST', body: JSON.stringify(data) }),
+    sendToSewing: (data) =>
+      request('/api/cutting/send-to-sewing', { method: 'POST', body: JSON.stringify(data) }),
   },
   warehouse: {
     items: () => request('/api/warehouse/items'),
@@ -359,7 +375,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    qcPending: () => request('/api/warehouse-stock/qc/pending'),
+    // qc/pending удалён; очередь ОТК только через batchesPendingQc (batches/pending-qc)
     qc: (orderId) => request(`/api/warehouse-stock/qc?order_id=${orderId}`),
     postQc: (data) =>
       request('/api/warehouse-stock/qc', {
@@ -380,12 +396,9 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+  // sewing-plans отключён; партии создаются только через Пошив → «Завершить пошив → ОТК»
   sewingPlans: {
-    finishBatch: (data) =>
-      request('/api/sewing-plans/batches/finish', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+    finishBatch: () => Promise.reject(new Error('Используйте «Завершить пошив → ОТК» на странице Пошив')),
   },
   sizes: {
     list: () => request('/api/sizes'),

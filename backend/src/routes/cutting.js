@@ -4,10 +4,12 @@
  */
 
 const express = require('express');
+const { Op } = require('sequelize');
 const db = require('../models');
 const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
+const SEWING_FLOOR_IDS = [2, 3, 4];
 
 /**
  * GET /api/cutting/tasks?cutting_type=Аксы|cutting_type=Аутсорс|...
@@ -218,6 +220,96 @@ router.delete('/tasks/:id', async (req, res, next) => {
 
     await task.destroy();
     await logAudit(req.user.id, 'DELETE', 'cutting_task', task.id);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/cutting/complete
+ * Завершить раскрой по заказу (и опционально этажу). Проверка: факт >= план. order_stages.cutting = DONE.
+ */
+router.post('/complete', async (req, res, next) => {
+  try {
+    const { order_id, floor_id } = req.body;
+    if (!order_id) return res.status(400).json({ error: 'Укажите order_id' });
+
+    const order = await db.Order.findByPk(Number(order_id), { attributes: ['id', 'quantity', 'total_quantity'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    const where = { order_id: Number(order_id) };
+    if (floor_id != null && floor_id !== '') where.floor = Number(floor_id);
+
+    const tasks = await db.CuttingTask.findAll({ where, raw: true });
+    let planTotal = 0;
+    let factTotal = 0;
+    for (const t of tasks) {
+      const variants = t.actual_variants && Array.isArray(t.actual_variants) ? t.actual_variants : [];
+      variants.forEach((v) => {
+        planTotal += parseInt(v.quantity_planned, 10) || 0;
+        factTotal += parseInt(v.quantity_actual, 10) || 0;
+      });
+    }
+    if (planTotal <= 0) planTotal = Number(order.total_quantity ?? order.quantity ?? 0) || 0;
+    if (planTotal > 0 && factTotal < planTotal) {
+      return res.status(400).json({ error: 'Факт меньше плана. Завершение раскроя невозможно.' });
+    }
+
+    const now = new Date();
+    const cutStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'cutting' } });
+    if (cutStage) await cutStage.update({ status: 'DONE', completed_at: now });
+    // Цепочка: раскрой DONE → пошив IN_PROGRESS
+    const sewingStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'sewing' } });
+    if (sewingStage) await sewingStage.update({ status: 'IN_PROGRESS', started_at: now });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/cutting/send-to-sewing
+ * Единая цепочка: не создаём sewing_plan_rows. Только:
+ * - проверка плана в Планировании (production_plan_day);
+ * - upsert sewing_order_floors (order_id, floor_id) со статусом IN_PROGRESS;
+ * - order_stages.sewing = IN_PROGRESS.
+ * План по дням на странице Пошив читается из production_plan_day (GET /api/sewing/board).
+ */
+router.post('/send-to-sewing', async (req, res, next) => {
+  try {
+    const { order_id, floor_id } = req.body;
+    if (!order_id || floor_id == null || floor_id === '') {
+      return res.status(400).json({ error: 'Укажите order_id и floor_id' });
+    }
+    const fid = Number(floor_id);
+    if (!SEWING_FLOOR_IDS.includes(fid)) {
+      return res.status(400).json({ error: 'Этаж пошива должен быть 2, 3 или 4' });
+    }
+
+    const order = await db.Order.findByPk(Number(order_id), { attributes: ['id'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+
+    // План пошива — только из Планирования (production_plan_day). Без плана отправлять нельзя.
+    const planCount = await db.ProductionPlanDay.count({
+      where: { order_id: Number(order_id), floor_id: fid },
+      col: 'id',
+    });
+    if (planCount === 0) {
+      return res.status(400).json({
+        error: 'Нет плана в Планировании. Сначала заполните Планирование по этому заказу и этажу.',
+      });
+    }
+
+    await db.SewingOrderFloor.upsert(
+      { order_id: Number(order_id), floor_id: fid, status: 'IN_PROGRESS', done_at: null, done_batch_id: null },
+      { conflictFields: ['order_id', 'floor_id'] }
+    );
+
+    const now = new Date();
+    const sewingStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'sewing' } });
+    if (sewingStage) await sewingStage.update({ status: 'IN_PROGRESS', started_at: now });
+
     res.json({ ok: true });
   } catch (err) {
     next(err);

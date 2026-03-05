@@ -1,7 +1,6 @@
 /**
  * Создание заказа
- * Матрица цвет×размер: общее количество, выбор размеров, цвета, ячейки с количеством
- * Сумма матрицы должна строго равняться общему количеству
+ * Матрица цвет×размер, как было. Добавлен выбор ростовки; общее количество разделено на две части: ростовка + количество.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -11,9 +10,14 @@ import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
 import { NeonButton, NeonInput, NeonSelect } from '../components/ui';
 import PrintButton from '../components/PrintButton';
 
+const ROSTOVKI = [
+  { id: '165', name: '165' },
+  { id: '170', name: '170' },
+  { id: 'other', name: 'Другое' },
+];
+
 const LETTER_SIZES = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
 const NUMERIC_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', '54', '56'];
-const DEFAULT_SIZES = [...LETTER_SIZES, ...NUMERIC_SIZES];
 
 export default function CreateOrder() {
   const navigate = useNavigate();
@@ -35,19 +39,13 @@ export default function CreateOrder() {
     planned_month: '',
     workshop_id: '',
   });
-  // Список выбранных размеров (для матрицы)
+  const [rostovka, setRostovka] = useState('');
   const [selectedSizes, setSelectedSizes] = useState([]);
-  // Список цветов
   const [colors, setColors] = useState([]);
-  // Матрица: { "color|size": quantity }
   const [matrix, setMatrix] = useState({});
-  // Новый размер (для добавления)
   const [newSizeInput, setNewSizeInput] = useState('');
-  // Новый цвет (для добавления)
   const [newColorInput, setNewColorInput] = useState('');
-  // Редактирование итога по строке: { color, value }
   const [editingRowTotal, setEditingRowTotal] = useState(null);
-  // Фото заказа (base64)
   const [orderPhotos, setOrderPhotos] = useState([]);
 
   const loadRefs = useCallback(() => {
@@ -59,10 +57,8 @@ export default function CreateOrder() {
     loadRefs();
   }, [loadRefs]);
 
-  // Автообновление при возврате в приложение — новые клиенты от админа появятся на телефоне
   useRefreshOnVisible(loadRefs);
 
-  // Поиск цветов при вводе
   useEffect(() => {
     const term = (newColorInput || '').trim();
     if (term.length < 2) {
@@ -155,10 +151,7 @@ export default function CreateOrder() {
     });
   };
 
-  const clearMatrix = () => {
-    setMatrix({});
-  };
-
+  const clearMatrix = () => setMatrix({});
   const fillZeros = () => {
     const next = { ...matrix };
     colors.forEach((c) => {
@@ -170,7 +163,6 @@ export default function CreateOrder() {
     setMatrix(next);
   };
 
-  /** Распределить итог по строке на размеры (равномерно) */
   const distributeRowTotal = (color, totalStr) => {
     const total = parseInt(totalStr, 10) || 0;
     if (total <= 0 || selectedSizes.length === 0) return;
@@ -181,23 +173,18 @@ export default function CreateOrder() {
       const next = { ...prev };
       selectedSizes.forEach((s, i) => {
         const key = `${color}|${s}`;
-        const val = i < remainder ? base + 1 : base;
-        next[key] = val;
+        next[key] = i < remainder ? base + 1 : base;
       });
       return next;
     });
   };
 
   const handleAddSizeFromInput = () => {
-    if (newSizeInput.trim()) {
-      addSize(newSizeInput.trim());
-    }
+    if (newSizeInput.trim()) addSize(newSizeInput.trim());
   };
 
   const handleAddColorFromInput = () => {
-    if (newColorInput.trim()) {
-      addColor(newColorInput.trim());
-    }
+    if (newColorInput.trim()) addColor(newColorInput.trim());
   };
 
   const handleSubmit = async (e) => {
@@ -264,9 +251,7 @@ export default function CreateOrder() {
           >
             <option value="">Выберите клиента</option>
             {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </NeonSelect>
         </div>
@@ -280,7 +265,6 @@ export default function CreateOrder() {
               maxLength={10}
               required
             />
-            {/* <p className="mt-1 text-xs text-[#ECECEC]/60">Максимум 10 символов</p> */}
           </div>
           <div>
             <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Название модели</label>
@@ -295,16 +279,34 @@ export default function CreateOrder() {
             Получится: {(form.tz_code || '...').trim()} — {(form.model_name || '...').trim()}
           </p>
         </div>
-        <div>
-          <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Общее количество</label>
-          <NeonInput
-            type="number"
-            min="1"
-            value={form.total_quantity}
-            onChange={(e) => setForm({ ...form, total_quantity: e.target.value })}
-            required
-          />
+
+        {/* Две части: ростовка + общее количество */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Ростовка</label>
+            <NeonSelect
+              value={rostovka}
+              onChange={(e) => setRostovka(e.target.value)}
+              className="w-full"
+            >
+              <option value="">Выберите ростовку</option>
+              {ROSTOVKI.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </NeonSelect>
+          </div>
+          <div>
+            <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-1">Общее количество</label>
+            <NeonInput
+              type="number"
+              min="1"
+              value={form.total_quantity}
+              onChange={(e) => setForm({ ...form, total_quantity: e.target.value })}
+              required
+            />
+          </div>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border-[0.5px] border-white/20 bg-accent-2/20 p-3">
             <label className="flex items-center gap-2 text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">
@@ -346,7 +348,6 @@ export default function CreateOrder() {
           />
         </div>
 
-        {/* Блок «План заказа» */}
         <div className="border-t border-white/25 dark:border-white/25 pt-6 mt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -358,9 +359,7 @@ export default function CreateOrder() {
               >
                 <option value="">Выберите месяц</option>
                 {months.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
+                  <option key={m} value={m}>{m}</option>
                 ))}
               </NeonSelect>
             </div>
@@ -373,16 +372,13 @@ export default function CreateOrder() {
               >
                 <option value="">Выберите цех</option>
                 {workshops.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
+                  <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </NeonSelect>
             </div>
           </div>
         </div>
 
-        {/* Фото заказа */}
         <div className="border-t border-white/25 dark:border-white/25 pt-6 mt-6">
           <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">Фото заказа</label>
           <div className="flex flex-wrap gap-3 items-start">
@@ -424,24 +420,20 @@ export default function CreateOrder() {
           </div>
         </div>
 
-        {/* Блок «Цвета и размеры» */}
+        {/* Цвета и размеры — как было */}
         <div className="border-t border-white/25 dark:border-white/25 pt-6 mt-6">
           <h2 className="text-lg font-semibold text-[#ECECEC] dark:text-dark-text mb-4">Цвета и размеры</h2>
 
-          {/* Размеры */}
           <div className="mb-4">
             <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">Размеры</label>
             <div className="flex flex-wrap gap-2 items-center mb-2">
-              <span className="text-[#ECECEC]/60 dark:text-dark-text/60 text-xs mr-1">Цифровые:</span>
+              <span className="text-[#ECECEC]/60 text-xs mr-1">Цифровые:</span>
               {[...NUMERIC_SIZES, ...selectedSizes.filter((s) => /^\d+$/.test(s) && !NUMERIC_SIZES.includes(s))].map((name) => (
                 <label key={name} className="flex items-center gap-1">
                   <input
                     type="checkbox"
                     checked={selectedSizes.includes(name)}
-                    onChange={(e) => {
-                      if (e.target.checked) addSize(name);
-                      else removeSize(name);
-                    }}
+                    onChange={(e) => (e.target.checked ? addSize(name) : removeSize(name))}
                     className="rounded"
                   />
                   <span className="text-[#ECECEC] dark:text-dark-text">{name}</span>
@@ -449,58 +441,48 @@ export default function CreateOrder() {
               ))}
             </div>
             <div className="flex flex-wrap gap-2 items-center mb-2">
-              <span className="text-[#ECECEC]/60 dark:text-dark-text/60 text-xs mr-1">Буквенные:</span>
+              <span className="text-[#ECECEC]/60 text-xs mr-1">Буквенные:</span>
               {[...LETTER_SIZES, ...selectedSizes.filter((s) => !/^\d+$/.test(s) && !LETTER_SIZES.includes(s))].map((name) => (
                 <label key={name} className="flex items-center gap-1">
                   <input
                     type="checkbox"
                     checked={selectedSizes.includes(name)}
-                    onChange={(e) => {
-                      if (e.target.checked) addSize(name);
-                      else removeSize(name);
-                    }}
+                    onChange={(e) => (e.target.checked ? addSize(name) : removeSize(name))}
                     className="rounded"
                   />
                   <span className="text-[#ECECEC] dark:text-dark-text">{name}</span>
                 </label>
               ))}
             </div>
-            <div className="flex gap-2 items-center flex-1">
-                <input
-                  type="text"
-                  value={newSizeInput}
-                  onChange={(e) => setNewSizeInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSizeFromInput())}
-                  placeholder="+ Добавить размер"
-                  className="px-3 py-1.5 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text text-sm min-w-[140px]"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddSizeFromInput}
-                  className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                >
-                  Добавить
-                </button>
-              </div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <input
+                type="text"
+                value={newSizeInput}
+                onChange={(e) => setNewSizeInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSizeFromInput())}
+                placeholder="+ Добавить размер"
+                className="px-3 py-1.5 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text text-sm min-w-[140px]"
+              />
+              <button
+                type="button"
+                onClick={handleAddSizeFromInput}
+                className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+              >
+                Добавить
+              </button>
+            </div>
           </div>
 
-          {/* Цвета */}
           <div className="mb-4">
             <label className="block text-sm text-[#ECECEC] dark:text-dark-text/90 mb-2">Цвета</label>
             <div className="flex flex-wrap gap-2 items-center mb-2">
               {colors.map((c) => (
                 <span
                   key={c}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text"
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text"
                 >
                   {c}
-                  <button
-                    type="button"
-                    onClick={() => removeColor(c)}
-                    className="text-red-400 hover:text-red-300 text-sm"
-                  >
-                    ×
-                  </button>
+                  <button type="button" onClick={() => removeColor(c)} className="text-red-400 hover:text-red-300 text-sm">×</button>
                 </span>
               ))}
               <div className="relative flex gap-2" ref={colorDropdownRef}>
@@ -510,11 +492,9 @@ export default function CreateOrder() {
                   value={newColorInput}
                   onChange={(e) => setNewColorInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddColorFromInput())}
-                  onFocus={() =>
-                    newColorInput?.trim().length >= 2 && colorSuggestions.length > 0 && setColorDropdownOpen(true)
-                  }
+                  onFocus={() => newColorInput?.trim().length >= 2 && colorSuggestions.length > 0 && setColorDropdownOpen(true)}
                   placeholder="+ Добавить цвет"
-                  className="px-3 py-1.5 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text text-sm min-w-[140px]"
+                  className="px-3 py-1.5 rounded-lg bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text text-sm min-w-[140px]"
                 />
                 <button
                   type="button"
@@ -524,7 +504,7 @@ export default function CreateOrder() {
                   Добавить
                 </button>
                 {colorDropdownOpen && colorSuggestions.length > 0 && (
-                  <ul className="absolute z-10 w-full mt-1 py-1 bg-accent-2 dark:bg-dark-800 border border-white/25 dark:border-white/25 rounded-lg shadow-lg max-h-48 overflow-auto top-full left-0 min-w-[200px]">
+                  <ul className="absolute z-10 w-full mt-1 py-1 bg-accent-2 dark:bg-dark-800 border border-white/25 rounded-lg shadow-lg max-h-48 overflow-auto top-full left-0 min-w-[200px]">
                     {colorSuggestions.map((c) => (
                       <li
                         key={c.id}
@@ -540,51 +520,36 @@ export default function CreateOrder() {
             </div>
           </div>
 
-          {/* Матрица */}
           {selectedSizes.length > 0 && colors.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-white/25 dark:border-white/25 -mx-1">
+            <div className="overflow-x-auto rounded-xl border border-white/25 -mx-1">
               <table className="w-full text-sm border-collapse min-w-[280px] table-fixed">
                 <thead>
-                  <tr className="border-b border-white/20 dark:border-white/20">
-                    <th className="text-left px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-r border-white/15 dark:border-white/15">
-                      Цвет
-                    </th>
+                  <tr className="border-b border-white/20">
+                    <th className="text-left px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-r border-white/15">Цвет</th>
                     {selectedSizes.map((s) => (
-                      <th
-                        key={s}
-                        className="px-2 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-white/15 dark:border-white/15 text-center w-20"
-                      >
-                        {s}
-                      </th>
+                      <th key={s} className="px-2 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-white/15 text-center w-20">{s}</th>
                     ))}
-                    <th className="px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-white/15 dark:border-white/15 text-center">
-                      Итого
-                    </th>
+                    <th className="px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text/90 border-b border-white/15 text-center">Итого</th>
                   </tr>
                 </thead>
                 <tbody>
                   {colors.map((color) => {
-                    const rowSum = selectedSizes.reduce(
-                      (a, s) => a + (parseInt(getCell(color, s), 10) || 0),
-                      0
-                    );
+                    const rowSum = selectedSizes.reduce((a, s) => a + (parseInt(getCell(color, s), 10) || 0), 0);
                     return (
-                      <tr key={color} className="border-b border-white/15 dark:border-white/15">
-                        <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text border-b border-r border-white/15 dark:border-white/15">
-                          {color}
-                        </td>
+                      <tr key={color} className="border-b border-white/15">
+                        <td className="px-4 py-3 text-[#ECECEC] dark:text-dark-text border-r border-white/15">{color}</td>
                         {selectedSizes.map((size) => (
-                          <td key={size} className="px-2 py-2 border-b border-white/15 dark:border-white/15 text-center w-20">
+                          <td key={size} className="px-2 py-2 border-b border-white/15 text-center w-20">
                             <input
                               type="number"
                               min="0"
                               value={getCell(color, size)}
                               onChange={(e) => setCell(color, size, e.target.value)}
-                              className="w-16 min-w-16 mx-auto block px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text text-center box-border"
+                              className="w-16 min-w-16 mx-auto block px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text text-center box-border"
                             />
                           </td>
                         ))}
-                        <td className="px-2 py-2 border-b border-white/15 dark:border-white/15 text-center w-20">
+                        <td className="px-2 py-2 border-b border-white/15 text-center w-20">
                           <input
                             type="number"
                             min="0"
@@ -596,8 +561,8 @@ export default function CreateOrder() {
                               setEditingRowTotal(null);
                             }}
                             onKeyDown={(e) => e.key === 'Enter' && (e.target.blur(), e.preventDefault())}
-                            title="Введите итог — распределится по размерам автоматически"
-                            className="w-16 min-w-16 mx-auto block px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 dark:border-white/25 text-[#ECECEC] dark:text-dark-text text-center box-border font-medium"
+                            title="Введите итог — распределится по размерам"
+                            className="w-16 min-w-16 mx-auto block px-2 py-1 rounded bg-accent-2/80 dark:bg-dark-800 border border-white/25 text-[#ECECEC] dark:text-dark-text text-center box-border font-medium"
                           />
                         </td>
                       </tr>
@@ -605,62 +570,26 @@ export default function CreateOrder() {
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-b border-white/20 dark:border-white/20">
-                    <td className="px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text border-r border-white/15 dark:border-white/15">
-                      Итого
-                    </td>
+                  <tr className="border-b border-white/20">
+                    <td className="px-4 py-3 font-medium text-[#ECECEC] dark:text-dark-text border-r border-white/15">Итого</td>
                     {selectedSizes.map((size) => {
-                      const colSum = colors.reduce(
-                        (a, c) => a + (parseInt(getCell(c, size), 10) || 0),
-                        0
-                      );
-                      return (
-                        <td
-                          key={size}
-                          className="px-2 py-3 font-medium text-[#ECECEC] dark:text-dark-text text-center w-20"
-                        >
-                          {colSum}
-                        </td>
-                      );
+                      const colSum = colors.reduce((a, c) => a + (parseInt(getCell(c, size), 10) || 0), 0);
+                      return <td key={size} className="px-2 py-3 font-medium text-[#ECECEC] dark:text-dark-text text-center w-20">{colSum}</td>;
                     })}
-                    <td
-                      className={`px-4 py-3 font-bold text-center ${
-                        matrixSum === totalQty && totalQty > 0
-                          ? 'text-green-400'
-                          : matrixSum > 0
-                          ? 'text-red-400'
-                          : 'text-[#ECECEC] dark:text-dark-text'
-                      }`}
-                    >
+                    <td className={`px-4 py-3 font-bold text-center ${matrixSum === totalQty && totalQty > 0 ? 'text-green-400' : matrixSum > 0 ? 'text-red-400' : 'text-[#ECECEC] dark:text-dark-text'}`}>
                       {matrixSum}
                     </td>
                   </tr>
                 </tfoot>
               </table>
-              <div className="p-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={clearMatrix}
-                  className="text-sm px-3 py-1.5 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3"
-                >
+              <div className="p-2 flex gap-2 flex-wrap items-center">
+                <button type="button" onClick={clearMatrix} className="text-sm px-3 py-1.5 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40">
                   Очистить матрицу
                 </button>
-                <button
-                  type="button"
-                  onClick={fillZeros}
-                  className="text-sm px-3 py-1.5 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40 dark:hover:bg-dark-3"
-                >
+                <button type="button" onClick={fillZeros} className="text-sm px-3 py-1.5 rounded-lg bg-accent-1/30 dark:bg-dark-2 text-[#ECECEC] dark:text-dark-text hover:bg-accent-1/40">
                   Заполнить нулями
                 </button>
-                <span
-                  className={`text-sm py-1.5 ${
-                    matrixSum === totalQty && totalQty > 0
-                      ? 'text-green-400'
-                      : matrixSum > 0
-                      ? 'text-red-400'
-                      : 'text-[#ECECEC]/80 dark:text-dark-text/80'
-                  }`}
-                >
+                <span className={`text-sm py-1.5 ${matrixSum === totalQty && totalQty > 0 ? 'text-green-400' : matrixSum > 0 ? 'text-red-400' : 'text-[#ECECEC]/80'}`}>
                   Сумма: {matrixSum} / {totalQty}
                   {matrixSum === totalQty && totalQty > 0 ? ' ✓' : matrixSum > 0 ? ' — не совпадает' : ''}
                 </span>
@@ -669,18 +598,11 @@ export default function CreateOrder() {
           )}
         </div>
 
-        <div className="flex gap-3 pt-2">
-          <NeonButton
-            type="submit"
-            disabled={loading || !isValid}
-          >
+        <div className="flex gap-3 pt-2 border-t border-white/25 pt-6 mt-6">
+          <NeonButton type="submit" disabled={loading || !isValid}>
             {loading ? 'Создание...' : 'Создать заказ'}
           </NeonButton>
-          <NeonButton
-            type="button"
-            onClick={() => navigate(-1)}
-            variant="secondary"
-          >
+          <NeonButton type="button" onClick={() => navigate(-1)} variant="secondary">
             Отмена
           </NeonButton>
         </div>
