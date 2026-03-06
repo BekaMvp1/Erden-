@@ -11,6 +11,9 @@ module.exports = (sequelize, DataTypes) => {
       model_id: { type: DataTypes.INTEGER, allowNull: true },
       floor_id: { type: DataTypes.INTEGER, allowNull: true },
       batch_code: { type: DataTypes.STRING(50), allowNull: false, unique: true },
+      date_from: { type: DataTypes.DATEONLY, allowNull: true },
+      date_to: { type: DataTypes.DATEONLY, allowNull: true },
+      qty: { type: DataTypes.INTEGER, allowNull: true },
       started_at: { type: DataTypes.DATE, allowNull: true },
       finished_at: { type: DataTypes.DATE, allowNull: true },
       status: {

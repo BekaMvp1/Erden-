@@ -51,6 +51,130 @@ router.get('/floors', async (req, res, next) => {
 });
 
 /**
+ * GET /api/planning/plan?order_id=&floor_id=&date_from=&date_to=
+ * Единый API плана по периоду: дневные строки из production_plan_day (план) и sewing_fact (факт).
+ * Возвращает: [{ date: 'YYYY-MM-DD', planned_qty: number, fact_qty: number }]
+ */
+router.get('/plan', async (req, res, next) => {
+  try {
+    const { order_id, floor_id, date_from, date_to } = req.query;
+    if (!order_id || floor_id == null || floor_id === '') {
+      return res.status(400).json({ error: 'Укажите order_id и floor_id' });
+    }
+    if (!date_from || !date_to) {
+      return res.status(400).json({ error: 'Укажите date_from и date_to' });
+    }
+    const fromStr = String(date_from).slice(0, 10);
+    const toStr = String(date_to).slice(0, 10);
+    if (fromStr > toStr) {
+      return res.status(400).json({ error: 'date_from не должен быть больше date_to' });
+    }
+
+    const oid = Number(order_id);
+    const fid = Number(floor_id);
+
+    const planRows = await db.sequelize.query(
+      `SELECT date::text AS date, COALESCE(SUM(planned_qty), 0)::int AS planned_qty
+       FROM production_plan_day
+       WHERE order_id = :oid
+         AND ((:fid IS NULL AND floor_id IS NULL) OR floor_id = :fid)
+         AND date >= :fromStr AND date <= :toStr
+       GROUP BY date
+       ORDER BY date`,
+      { replacements: { oid, fid: fid || null, fromStr, toStr }, type: db.sequelize.QueryTypes.SELECT }
+    );
+    let factRows = [];
+    if (fid != null && fid !== '' && Number(fid) >= 1 && Number(fid) <= 4) {
+      factRows = await db.sequelize.query(
+        `SELECT date::text AS date, COALESCE(SUM(fact_qty), 0)::int AS fact_qty
+         FROM sewing_fact
+         WHERE order_id = :oid AND floor_id = :fid
+           AND date >= :fromStr AND date <= :toStr
+         GROUP BY date
+         ORDER BY date`,
+        { replacements: { oid, fid: Number(fid), fromStr, toStr }, type: db.sequelize.QueryTypes.SELECT }
+      );
+      if (!Array.isArray(factRows)) factRows = [];
+    }
+
+    const planByDate = {};
+    (planRows || []).forEach((r) => { planByDate[r.date] = Number(r.planned_qty) || 0; });
+    const factByDate = {};
+    (factRows || []).forEach((r) => { factByDate[r.date] = Number(r.fact_qty) || 0; });
+
+    const dates = [];
+    const d = new Date(fromStr + 'T12:00:00');
+    const end = new Date(toStr + 'T12:00:00');
+    while (d <= end) {
+      const dateKey = d.toISOString().slice(0, 10);
+      dates.push({
+        date: dateKey,
+        planned_qty: planByDate[dateKey] ?? 0,
+        fact_qty: factByDate[dateKey] ?? 0,
+      });
+      d.setDate(d.getDate() + 1);
+    }
+    res.json(dates);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/planning/plan-day
+ * body: { order_id, floor_id, date, planned_qty }
+ * Upsert в production_plan_day (источник плана по дням).
+ */
+router.put('/plan-day', async (req, res, next) => {
+  try {
+    if (req.user?.role === 'operator') {
+      return res.status(403).json({ error: 'Оператор не может редактировать план' });
+    }
+    const { order_id, floor_id, date, planned_qty } = req.body;
+    if (!order_id || !date) {
+      return res.status(400).json({ error: 'Укажите order_id и date' });
+    }
+    const order = await db.Order.findByPk(Number(order_id), { attributes: ['id', 'workshop_id'] });
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    const workshop_id = order.workshop_id;
+    if (!workshop_id) return res.status(400).json({ error: 'У заказа не указан цех' });
+    const workshop = await db.Workshop.findByPk(workshop_id);
+    if (!workshop) return res.status(404).json({ error: 'Цех не найден' });
+
+    let effectiveFloorId = null;
+    if (workshop.floors_count === 4 && floor_id != null && floor_id !== '' && floor_id !== 'all') {
+      effectiveFloorId = Number(floor_id);
+      if (effectiveFloorId < 1 || effectiveFloorId > 4) {
+        return res.status(400).json({ error: 'floor_id должен быть от 1 до 4' });
+      }
+    }
+
+    const dateStr = String(date).slice(0, 10);
+    const period = await requireActivePeriodForDate(db, dateStr);
+    const planned = Math.max(0, parseInt(planned_qty, 10) || 0);
+
+    const [row, created] = await db.ProductionPlanDay.findOrCreate({
+      where: {
+        period_id: period.id,
+        order_id: Number(order_id),
+        date: dateStr,
+        workshop_id: Number(workshop_id),
+        floor_id: effectiveFloorId,
+      },
+      defaults: { planned_qty: planned, actual_qty: 0 },
+    });
+    if (!created) await row.update({ planned_qty: planned });
+
+    await syncWeeklyCacheFromDaily(db, Number(workshop_id), effectiveFloorId, Number(order_id), [dateStr], period.id);
+    await recalculateCarry(db, Number(workshop_id), effectiveFloorId, period.id);
+
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/planning/table?workshop_id=&from=&to=&floor_id=&period_id=
  * Таблица плана: заказчик, модель, даты, план, факт, итого. period_id опционален (фильтр по периоду).
  */

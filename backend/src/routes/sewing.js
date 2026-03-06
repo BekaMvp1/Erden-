@@ -578,15 +578,16 @@ router.get('/complete-status', async (req, res, next) => {
 
 /**
  * POST /api/sewing/complete
- * Единый поток: plan_sum из production_plan_day, fact_sum из sewing_fact; проверка fact_sum >= plan_sum, plan_sum > 0.
- * Создаёт sewing_batches + sewing_batch_items, обновляет sewing_order_floors (done_batch_id). qc_batches не создаём — ОТК берёт pending по отсутствию qc_batches.
- * Body: { order_id, floor_id }
+ * Ежедневное поступление в ОТК: партия по периоду date_from/date_to.
+ * fact_sum и plan_sum считаются по фильтру df/dt. Завершение разрешено при fact_sum > 0 (без требования закрыть весь план).
+ * Дубликат за тот же (order_id, floor_id, date_from, date_to) — возврат существующего batch_id.
+ * Body: { order_id, floor_id, date_from?, date_to? }
  * Ответ: { ok: true, batch_id }
  */
 router.post('/complete', async (req, res, next) => {
   try {
     const sewingFloorIds = await getSewingFloorIds();
-    const { order_id, floor_id } = req.body;
+    const { order_id, floor_id, date_from, date_to } = req.body;
     if (!order_id || floor_id == null || floor_id === '') {
       return res.status(400).json({ error: 'Укажите order_id и floor_id' });
     }
@@ -595,50 +596,68 @@ router.post('/complete', async (req, res, next) => {
       return res.status(400).json({ error: 'Укажите этаж пошива (производственный этаж).' });
     }
 
+    const df = date_from ? String(date_from).slice(0, 10) : null;
+    const dt = date_to ? String(date_to).slice(0, 10) : null;
+    const replacements = {
+      order_id: Number(order_id),
+      floor_id: effectiveFloorId,
+      df,
+      dt,
+    };
+
     const order = await db.Order.findByPk(Number(order_id), {
       attributes: ['id', 'model_id', 'workshop_id'],
     });
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
 
-    // Суммы по заказу и этажу по всем датам (без фильтра по периоду), чтобы не было расхождения с сохранённым фактом
     const [factAgg] = await db.sequelize.query(
-      `SELECT COALESCE(SUM(fact_qty), 0)::int AS fact_sum FROM sewing_fact WHERE order_id = :order_id AND floor_id = :floor_id`,
-      { replacements: { order_id: Number(order_id), floor_id: effectiveFloorId } }
+      `SELECT COALESCE(SUM(fact_qty), 0)::int AS fact_sum
+       FROM sewing_fact
+       WHERE order_id = :order_id AND floor_id = :floor_id
+         AND (:df IS NULL OR date >= :df)
+         AND (:dt IS NULL OR date <= :dt)`,
+      { replacements }
     );
     const fact_sum = Number(factAgg?.[0]?.fact_sum) || 0;
 
+    if (fact_sum <= 0) {
+      return res.status(400).json({
+        error: 'Нет факта пошива за выбранный период. Введите факт по датам и нажмите «Сохранить факты».',
+      });
+    }
+
     const [planAgg] = await db.sequelize.query(
-      `SELECT COALESCE(SUM(planned_qty), 0)::int AS plan_sum FROM production_plan_day WHERE order_id = :order_id AND floor_id = :floor_id`,
-      { replacements: { order_id: Number(order_id), floor_id: effectiveFloorId } }
+      `SELECT COALESCE(SUM(planned_qty), 0)::int AS plan_sum
+       FROM production_plan_day
+       WHERE order_id = :order_id AND floor_id = :floor_id
+         AND (:df IS NULL OR date >= :df)
+         AND (:dt IS NULL OR date <= :dt)`,
+      { replacements }
     );
     const plan_sum = Number(planAgg?.[0]?.plan_sum) || 0;
 
-    if (plan_sum <= 0) {
-      return res.status(400).json({ error: 'Нет плана пошива по этому заказу и этажу. Добавьте план в Планировании.' });
-    }
-    if (fact_sum < plan_sum) {
-      return res.status(400).json({
-        error: `Факт (${fact_sum}) меньше плана (${plan_sum}). Нажмите «Как план и сохранить», затем «Завершить пошив → ОТК».`,
+    // Не допускать дублей за тот же период: если партия уже есть — вернуть её batch_id
+    if (df != null && dt != null) {
+      const existingBatch = await db.SewingBatch.findOne({
+        where: {
+          order_id: Number(order_id),
+          floor_id: effectiveFloorId,
+          date_from: df,
+          date_to: dt,
+        },
+        attributes: ['id'],
       });
-    }
-    if (fact_sum <= 0) {
-      return res.status(400).json({
-        error: 'Нет факта пошива. Нажмите «Как план и сохранить», затем «Завершить пошив → ОТК».',
-      });
-    }
-
-    const existingDone = await db.SewingOrderFloor.findOne({
-      where: { order_id: Number(order_id), floor_id: effectiveFloorId, status: 'DONE' },
-    });
-    if (existingDone) {
-      return res.status(400).json({ error: 'Пошив по этому заказу и этажу уже завершён.', batch_id: existingDone.done_batch_id });
+      if (existingBatch) {
+        return res.status(200).json({ ok: true, batch_id: existingBatch.id });
+      }
     }
 
     const t = await db.sequelize.transaction();
     try {
       const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const batchCode = `AUTO-${order_id}-${effectiveFloorId}-${todayStr}`;
+      const dfStr = (df || now.toISOString().slice(0, 10)).replace(/-/g, '');
+      const dtStr = (dt || df || now.toISOString().slice(0, 10)).replace(/-/g, '');
+      const batchCode = `AUTO-${order_id}-${effectiveFloorId}-${dfStr}-${dtStr}`;
 
       const batch = await db.SewingBatch.create(
         {
@@ -646,6 +665,9 @@ router.post('/complete', async (req, res, next) => {
           model_id: order.model_id || null,
           floor_id: effectiveFloorId,
           batch_code: batchCode,
+          date_from: df || null,
+          date_to: dt || null,
+          qty: fact_sum,
           started_at: now,
           finished_at: now,
           status: 'READY_FOR_QC',
@@ -653,7 +675,7 @@ router.post('/complete', async (req, res, next) => {
         { transaction: t }
       );
 
-      // Одна запись в sewing_batch_items с общим количеством (fact_sum). model_size_id нужен для ОТК.
+      // Одна запись в sewing_batch_items с общим количеством (fact_sum). sewing_fact не содержит model_size_id — берём размер модели заказа.
       let model_size_id = null;
       if (order.model_id) {
         const firstSize = await db.ModelSize.findOne({
@@ -684,23 +706,7 @@ router.post('/complete', async (req, res, next) => {
         { transaction: t }
       );
 
-      await db.SewingOrderFloor.upsert(
-        {
-          order_id: Number(order_id),
-          floor_id: effectiveFloorId,
-          status: 'DONE',
-          done_at: now,
-          done_batch_id: batch.id,
-        },
-        { transaction: t, conflictFields: ['order_id', 'floor_id'] }
-      );
-
-      // Единый пайплайн: пошив DONE → ОТК IN_PROGRESS
-      const sewingStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'sewing' }, transaction: t });
-      if (sewingStage) await sewingStage.update({ status: 'DONE', completed_at: now }, { transaction: t });
-      const qcStage = await db.OrderStage.findOne({ where: { order_id: Number(order_id), stage_key: 'qc' }, transaction: t });
-      if (qcStage) await qcStage.update({ status: 'IN_PROGRESS', started_at: now }, { transaction: t });
-
+      // Ежедневная партия: не переводим sewing_order_floors и order_stages в DONE — партия сразу в pending ОТК
       await t.commit();
       res.json({ ok: true, batch_id: batch.id });
     } catch (err) {

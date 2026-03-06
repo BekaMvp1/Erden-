@@ -247,9 +247,12 @@ export default function Sewing() {
         floor_id: Number(floor_id),
         facts,
       });
+      const { date_from, date_to } = getPeriodRange(period);
       const res = await api.sewing.complete({
         order_id: Number(order_id),
         floor_id: Number(floor_id),
+        date_from,
+        date_to,
       });
       setSuccessMsg('✓ Завершено. Партия отправлена в ОТК.');
       setTimeout(() => setSuccessMsg(''), 4000);

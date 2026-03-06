@@ -16,6 +16,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         unique: true,
       },
+      status: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'DONE',
+      },
       checked_total: {
         type: DataTypes.DECIMAL(12, 3),
         allowNull: false,

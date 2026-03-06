@@ -364,7 +364,7 @@ export default function Planning() {
     to &&
     (selectedWorkshop?.floors_count === 1 || (selectedWorkshop?.floors_count > 1 && floorId));
 
-  // Загрузка таблицы
+  // Загрузка таблицы: дневные строки из единого API plan (production_plan_day + sewing_fact), заголовок из modelTable
   useEffect(() => {
     if (!canLoadTable) {
       setData(null);
@@ -372,18 +372,34 @@ export default function Planning() {
     }
     setTableLoading(true);
     setErrorMsg('');
-    const params = {
+    const effectiveFloorId = selectedWorkshop?.floors_count === 4 && floorId ? Number(floorId) : 0;
+    const planParams = { order_id: orderId, floor_id: effectiveFloorId, date_from: from, date_to: to };
+    const tableParams = {
       workshop_id: workshopId,
       order_id: orderId,
       from,
       to,
     };
-    if (selectedWorkshop?.floors_count > 1) {
-      params.floor_id = floorId;
-    }
-    api.planning
-      .modelTable(params)
-      .then(setData)
+    if (selectedWorkshop?.floors_count > 1) tableParams.floor_id = floorId;
+
+    Promise.all([
+      api.planning.plan(planParams),
+      api.planning.modelTable(tableParams),
+    ])
+      .then(([planRows, tableData]) => {
+        const rows = (planRows || []).map((r) => ({
+          date: r.date,
+          planned_qty: r.planned_qty ?? 0,
+          actual_qty: r.fact_qty ?? 0,
+        }));
+        const planned_sum = rows.reduce((s, r) => s + (r.planned_qty || 0), 0);
+        const actual_sum = rows.reduce((s, r) => s + (r.actual_qty || 0), 0);
+        setData({
+          ...tableData,
+          rows,
+          totals: { planned_sum, actual_sum },
+        });
+      })
       .catch((err) => {
         setData(null);
         setErrorMsg(err.message || 'Ошибка загрузки данных');
@@ -450,9 +466,18 @@ export default function Planning() {
       setApplySuccess(true);
       setTimeout(() => setApplySuccess(false), 3000);
       if (canLoadTable) {
-        const params = { workshop_id: workshopId, order_id: orderId, from, to };
-        if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
-        api.planning.modelTable(params).then(setData).catch(() => setData(null));
+        const effectiveFloorId = selectedWorkshop?.floors_count === 4 && floorId ? Number(floorId) : 0;
+        Promise.all([
+          api.planning.plan({ order_id: orderId, floor_id: effectiveFloorId, date_from: from, date_to: to }),
+          api.planning.modelTable({ workshop_id: workshopId, order_id: orderId, from, to, ...(selectedWorkshop?.floors_count > 1 && { floor_id: floorId }) }),
+        ]).then(([planRows, tableData]) => {
+          const rows = (planRows || []).map((r) => ({ date: r.date, planned_qty: r.planned_qty ?? 0, actual_qty: r.fact_qty ?? 0 }));
+          setData({
+            ...tableData,
+            rows,
+            totals: { planned_sum: rows.reduce((s, r) => s + (r.planned_qty || 0), 0), actual_sum: rows.reduce((s, r) => s + (r.actual_qty || 0), 0) },
+          });
+        }).catch(() => setData(null));
       }
       if (canLoadWeekly && weeklyOpen) {
         const wp = { month: weeklyMonth, workshop_id: workshopId };
@@ -497,19 +522,29 @@ export default function Planning() {
     setSaving(true);
     setErrorMsg('');
     try {
-      await api.planning.updateDay({
+      await api.planning.planDay({
         order_id: editModal.order_id,
-        workshop_id: Number(workshopId),
+        floor_id: selectedWorkshop?.floors_count === 4 && floorId ? Number(floorId) : null,
         date: editModal.date,
-        floor_id: selectedWorkshop?.floors_count > 1 ? Number(floorId) : null,
         planned_qty: editModal.planned_qty,
-        actual_qty: editModal.actual_qty,
       });
       setEditModal(null);
       if (canLoadTable) {
-        const params = { workshop_id: workshopId, order_id: orderId, from, to };
-        if (selectedWorkshop?.floors_count > 1) params.floor_id = floorId;
-        api.planning.modelTable(params).then(setData).catch(() => setData(null));
+        const effectiveFloorId = selectedWorkshop?.floors_count === 4 && floorId ? Number(floorId) : 0;
+        Promise.all([
+          api.planning.plan({ order_id: orderId, floor_id: effectiveFloorId, date_from: from, date_to: to }),
+          api.planning.modelTable({ workshop_id: workshopId, order_id: orderId, from, to, ...(selectedWorkshop?.floors_count > 1 && { floor_id: floorId }) }),
+        ]).then(([planRows, tableData]) => {
+          const rows = (planRows || []).map((r) => ({ date: r.date, planned_qty: r.planned_qty ?? 0, actual_qty: r.fact_qty ?? 0 }));
+          setData({
+            ...tableData,
+            rows,
+            totals: {
+              planned_sum: rows.reduce((s, r) => s + (r.planned_qty || 0), 0),
+              actual_sum: rows.reduce((s, r) => s + (r.actual_qty || 0), 0),
+            },
+          });
+        }).catch(() => setData(null));
       }
       if (canLoadWeekly && weeklyOpen) {
         const wp = { month: weeklyMonth, workshop_id: workshopId };

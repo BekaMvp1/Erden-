@@ -11,6 +11,14 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
+/** Нормализация роли: только 'admin' | 'manager' | 'technologist' | 'operator' (без локализации и пробелов) */
+function normalizeRole(r) {
+  const s = String(r ?? '').trim().toLowerCase();
+  if (s === 'administrator' || s === 'администратор') return 'admin';
+  if (['admin', 'manager', 'technologist', 'operator'].includes(s)) return s;
+  return s || 'operator';
+}
+
 /**
  * GET /api/auth/me — проверка токена, возвращает текущего пользователя
  * Используется при загрузке приложения для валидации сессии
@@ -26,7 +34,7 @@ router.get('/me', authenticate, async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: normalizeRole(user.role),
         floor_id: user.floor_id,
       },
     });
@@ -94,7 +102,7 @@ router.post('/login', async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: normalizeRole(user.role),
         floor_id: user.floor_id,
       },
     });

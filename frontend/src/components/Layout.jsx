@@ -192,17 +192,18 @@ export default function Layout() {
           { type: 'item', to: '/orders/create', label: 'Создать заказ', icon: 'create' },
           { type: 'item', to: '/planning', label: 'Планирование', icon: 'planning', end: true },
         ];
-  const productionBlockItems =
-    user?.role === 'operator'
-      ? []
-      : [
-          { type: 'item', to: '/procurement', label: 'Закуп', icon: 'procurement' },
-          { type: 'item', to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems },
-          { type: 'item', to: '/sewing', label: 'Пошив', icon: 'floorTasks' },
-          { type: 'item', to: '/qc', label: 'ОТК', icon: 'qc' },
-          { type: 'item', to: '/warehouse', label: 'Склад', icon: 'warehouse' },
-          { type: 'item', to: '/shipments', label: 'Отгрузка', icon: 'shipments' },
-        ];
+  // ОТК и производственный блок: admin, manager, technologist (не operator)
+  const canSeeProduction = user?.role && ['admin', 'manager', 'technologist'].includes(user.role);
+  const productionBlockItems = canSeeProduction
+    ? [
+        { type: 'item', to: '/procurement', label: 'Закуп', icon: 'procurement' },
+        { type: 'item', to: '/cutting', label: 'Раскрой', icon: 'cutting', dropdown: cuttingMenuItems },
+        { type: 'item', to: '/sewing', label: 'Пошив', icon: 'floorTasks' },
+        { type: 'item', to: '/qc', label: 'ОТК', icon: 'qc' },
+        { type: 'item', to: '/warehouse', label: 'Склад', icon: 'warehouse' },
+        { type: 'item', to: '/shipments', label: 'Отгрузка', icon: 'shipments' },
+      ]
+    : [];
   const systemBlockItems = [
     ...(user?.role !== 'operator' ? [{ type: 'item', to: '/reports', label: 'Отчёты', icon: 'reports' }] : []),
     ...(user?.role !== 'operator' ? [{ type: 'item', to: '/finance', label: 'Финансы', icon: 'finance' }] : []),

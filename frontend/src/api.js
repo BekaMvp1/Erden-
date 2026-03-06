@@ -121,6 +121,15 @@ export const api = {
       const q = new URLSearchParams(params).toString();
       return request(`/api/planning/model-table?${q}`);
     },
+    plan: (params) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/planning/plan?${q}`);
+    },
+    planDay: (data) =>
+      request('/api/planning/plan-day', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
     updateDay: (data) =>
       request('/api/planning/day', {
         method: 'PUT',

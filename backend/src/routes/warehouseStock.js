@@ -335,6 +335,7 @@ router.post('/qc/batch', async (req, res, next) => {
     const qcBatch = await db.QcBatch.create(
       {
         batch_id: Number(batch_id),
+        status: 'DONE',
         checked_total: checkedTotal,
         passed_total: passedTotal,
         defect_total: defectTotal,
