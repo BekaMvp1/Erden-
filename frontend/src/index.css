@@ -1,0 +1,334 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Базовые токены неоновой тёмной темы */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html {
+    color-scheme: dark;
+    --bg: #070708;
+    --bg2: #0b0c0e;
+    --surface: #101114;
+    --surface2: #14161a;
+    --text: #edeef0;
+    --muted: #a7adb6;
+    --border: rgba(255, 255, 255, 0.06);
+    /* Приглушённый лайм: лучше читаемость текста на кнопках */
+    --accent: #8bc734;
+    --accent2: #6baf00;
+    --danger: #ff4d4d;
+    --warn: #ffcc00;
+    --success: #4dff88;
+
+    --color-primary-400: #9ed94d;
+    --color-primary-500: #8bc734;
+    --color-primary-600: #6baf00;
+    --color-primary-700: #5a9500;
+    --accent-1: #101114;
+    --accent-2: #14161a;
+    --accent-3: #101114;
+    --text-primary: #edeef0;
+    --bg-main: #070708;
+    --bg-sidebar: #0b0c0e;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+}
+
+body {
+  @apply antialiased;
+  color: var(--text-primary);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(199, 255, 26, 0.08), transparent 38%),
+    radial-gradient(circle at 85% 0%, rgba(155, 239, 0, 0.06), transparent 32%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+  font-family: var(--app-font, system-ui, -apple-system, sans-serif);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Гарантия видимости текста на тёмном фоне */
+#root {
+  min-height: 100vh;
+  color: inherit;
+}
+
+/* Скрыть нативную иконку календаря — используем свою */
+input[type="date"].planning-date-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+input[type="date"].planning-date-input::-moz-focus-inner {
+  border: 0;
+}
+
+/* Адаптив: таблицы с горизонтальным скроллом на мобильном */
+.table-responsive {
+  @apply overflow-x-auto -mx-3 sm:mx-0;
+}
+.table-responsive table {
+  @apply min-w-[600px] sm:min-w-0;
+}
+
+
+/* Header: ровные линии 1px, полупрозрачные */
+.header-top {
+  height: 56px;
+  min-height: 56px;
+  max-height: 56px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+html.dark .header-top {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+.sidebar-header-border {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+html.dark .sidebar-header-border {
+  border-right-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Унифицированные неоновые элементы интерфейса */
+.card-neon {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -20px 60px rgba(0, 0, 0, 0.6);
+}
+.card-neon:hover {
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -20px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(199, 255, 26, 0.25),
+    0 0 25px rgba(199, 255, 26, 0.12);
+}
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.btn-neon {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  transition: all 220ms ease;
+}
+
+.input-neon {
+  border-radius: 16px;
+  border: 0.5px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+.input-neon::placeholder {
+  color: var(--muted);
+}
+.input-neon:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(107, 175, 0, 0.35), 0 0 20px rgba(107, 175, 0, 0.12);
+}
+
+/* Единый вид input/select/textarea на Mac и Windows — как на Windows */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23a7adb6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  padding-right: 36px;
+}
+select::-ms-expand {
+  display: none;
+}
+
+/* Единый тонкий border-box для всех полей ввода */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border-width: 0.5px !important;
+  border-style: solid;
+}
+
+/* Единая палитра статусов: приглушённый зелёный для читаемости */
+html {
+  --status-success-text: #9ed94d;
+  --status-success-bg: rgba(107, 175, 0, 0.18);
+  --status-success-border: rgba(107, 175, 0, 0.4);
+  /* Без жёлтого: нейтральный серый */
+  --status-warn-text: #a0aec0;
+  --status-warn-bg: rgba(160, 174, 192, 0.16);
+  --status-warn-border: rgba(160, 174, 192, 0.32);
+  --status-danger-text: #ff9f9f;
+  --status-danger-bg: rgba(255, 122, 122, 0.16);
+  --status-danger-border: rgba(255, 122, 122, 0.32);
+}
+
+/* Success-группа: зелёный/лайм/изумрудный + прежний синий */
+[class*="text-green-"],
+[class*="text-emerald-"],
+[class*="text-lime-"],
+[class*="text-blue-"],
+[class*="text-sky-"] {
+  color: var(--status-success-text) !important;
+}
+[class*="bg-green-"],
+[class*="bg-emerald-"],
+[class*="bg-lime-"],
+[class*="bg-blue-"],
+[class*="bg-sky-"] {
+  background-color: var(--status-success-bg) !important;
+}
+[class*="border-green-"],
+[class*="border-emerald-"],
+[class*="border-lime-"],
+[class*="border-blue-"],
+[class*="border-sky-"] {
+  border-color: var(--status-success-border) !important;
+}
+
+/* Warning-группа: нейтральный серый (без жёлтого текста) */
+[class*="text-amber-"],
+[class*="text-yellow-"] {
+  color: var(--status-warn-text) !important;
+}
+[class*="bg-amber-"],
+[class*="bg-yellow-"] {
+  background-color: var(--status-warn-bg) !important;
+}
+[class*="border-amber-"],
+[class*="border-yellow-"] {
+  border-color: var(--status-warn-border) !important;
+}
+
+/* Danger-группа: красный */
+[class*="text-red-"] {
+  color: var(--status-danger-text) !important;
+}
+[class*="bg-red-"] {
+  background-color: var(--status-danger-bg) !important;
+}
+[class*="border-red-"] {
+  border-color: var(--status-danger-border) !important;
+}
+/* Правая панель: линия как слева, но белая полупрозрачная */
+.panel-right-border {
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+html.dark .panel-right-border {
+  border-left-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Современные узкие скроллбары */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+html.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+/* WebKit (Chrome, Safari, Edge) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Анимации страниц — плавные, с мягким easing */
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* cubic-bezier(0.25, 0.46, 0.45, 0.94) — плавный ease-out-quad */
+.animate-page-enter {
+  animation: page-fade-in 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+/* Stagger: задержка + сохранение начального состояния до старта */
+.animate-stagger {
+  animation-fill-mode: both;
+}
+
+/* Плавные переходы для блоков и интерактивных элементов */
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Плавный блок — карточки, таблицы, контейнеры */
+.transition-block {
+  transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              background-color 0.3s ease;
+}

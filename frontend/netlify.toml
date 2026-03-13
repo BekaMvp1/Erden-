@@ -1,0 +1,37 @@
+# Конфигурация Netlify для развёртывания frontend
+# При base = "frontend" в Netlify UI — config ищется в frontend/
+#
+# ОБЯЗАТЕЛЬНО: Site settings → Environment variables → добавить:
+#   VITE_API_URL = https://ваш-backend.onrender.com
+# (URL backend API, только https://)
+
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Принудительный HTTPS redirect
+[[redirects]]
+  from = "http://*"
+  to = "https://:splat"
+  status = 301
+  force = true
+
+# SPA fallback: все маршруты → index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer-when-downgrade"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

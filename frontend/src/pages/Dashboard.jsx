@@ -1,0 +1,238 @@
+/**
+ * Dashboard — таблица заказов
+ * Заголовок по центру, фильтр статусов, поиск по клиенту и названию (debounce 300ms)
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../api';
+import { useRefreshOnVisible } from '../hooks/useRefreshOnVisible';
+import { NeonButton, NeonCard, NeonInput, NeonSelect } from '../components/ui';
+import PrintButton from '../components/PrintButton';
+
+const STATUS_COLORS = {
+  Принят: 'bg-gray-500/20 text-gray-900 dark:text-gray-100',
+  'В работе': 'bg-lime-500/20 text-lime-400',
+  Готов: 'bg-green-500/20 text-green-400',
+  Просрочен: 'bg-red-500/20 text-red-400',
+};
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [statuses, setStatuses] = useState([]);
+
+  const loadStatuses = useCallback(async () => {
+    try {
+      const data = await api.references.orderStatus();
+      setStatuses(data);
+    } catch {}
+  }, []);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (statusFilter) params.status_id = statusFilter;
+      if (searchTerm) params.search = searchTerm;
+      const data = await api.orders.list(params);
+      setOrders(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter, searchTerm]);
+
+  useEffect(() => {
+    loadStatuses();
+  }, [loadStatuses]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  // Автообновление при возврате в приложение (телефон, другая вкладка)
+  useRefreshOnVisible(loadOrders);
+
+  // Debounce поиска 300ms
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchTerm(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const clearSearch = useCallback(() => {
+    setSearchInput('');
+    setSearchTerm('');
+  }, []);
+
+  const handleDelete = async (e, orderId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('Удалить заказ #' + orderId + '? Данные будут удалены безвозвратно.')) return;
+    setDeletingId(orderId);
+    try {
+      await api.orders.delete(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch (err) {
+      alert(err.message || 'Ошибка удаления');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const canDelete = user?.role === 'admin' || user?.role === 'manager';
+  const canEdit = !!user;
+
+  return (
+    <div className="text-neon-text">
+      <div className="no-print flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 md:mb-6">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-bold">Заказы</h1>
+          <PrintButton />
+          <NeonButton
+            type="button"
+            onClick={() => loadOrders()}
+            disabled={loading}
+            variant="secondary"
+            className="p-2"
+            title="Обновить список"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </NeonButton>
+        </div>
+        <div className="flex-1 flex justify-center items-center gap-2 max-w-md w-full sm:w-auto sm:mx-auto">
+          <NeonInput
+            type="text"
+            placeholder="Просто поиск"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          {searchInput && (
+          <NeonButton
+            type="button"
+            onClick={clearSearch}
+            variant="secondary"
+            className="p-2"
+            title="Очистить"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </NeonButton>
+          )}
+        </div>
+        {statuses.length > 0 && (
+          <NeonSelect
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="shrink-0"
+          >
+            <option value="">Все статусы</option>
+            {statuses.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </NeonSelect>
+        )}
+      </div>
+
+      <NeonCard className="overflow-hidden p-0">
+        {loading ? (
+          <div className="p-6 md:p-8 text-center text-neon-muted">Загрузка...</div>
+        ) : orders.length === 0 ? (
+          <div className="p-6 md:p-8 text-center text-neon-muted">Нет заказов</div>
+        ) : (
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr className="border-b border-white/20 dark:border-white/20">
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">ID</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Название</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Клиент</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Кол-во</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Дедлайн</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Статус</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-neon-muted">Цех пошива</th>
+                {(canEdit || canDelete) && <th className="w-24 px-4 py-3 text-neon-muted">Действия</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order) => (
+                <tr
+                  key={order.id}
+                  className="border-b border-white/10 hover:bg-white/5 transition-colors duration-300 ease-out"
+                >
+                  <td className="px-4 py-3">
+                    <Link
+                      to={`/orders/${order.id}`}
+                      className="text-primary-400 hover:underline"
+                    >
+                      {order.tz_code || order.title?.slice?.(0, 20) || '—'}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-neon-text">{order.title}</td>
+                  <td className="px-4 py-3 text-neon-muted">{order.Client?.name}</td>
+                  <td className="px-4 py-3 text-neon-muted">{order.quantity}</td>
+                  <td className="px-4 py-3 text-neon-muted whitespace-nowrap">{order.deadline}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                        STATUS_COLORS[order.OrderStatus?.name] || 'bg-accent-1/30 text-[#ECECEC]/90'
+                      }`}
+                    >
+                      {order.OrderStatus?.name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-neon-muted">{order.Floor?.name || '—'}</td>
+                  {(canEdit || canDelete) && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        {canEdit && (
+                          <Link
+                            to={`/orders/${order.id}`}
+                            className="p-1.5 rounded text-primary-400 hover:bg-accent-1/30"
+                            title="Редактировать"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </Link>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDelete(e, order.id)}
+                            disabled={deletingId === order.id}
+                            className="p-1.5 rounded text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                            title="Удалить"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        )}
+    </NeonCard>
+    </div>
+  );
+}
