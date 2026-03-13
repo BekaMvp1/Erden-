@@ -13,6 +13,7 @@ import PrintButton from '../components/PrintButton';
 const ROSTOVKI = [
   { id: '165', name: '165' },
   { id: '170', name: '170' },
+  { id: '160', name: '160' },
   { id: 'other', name: 'Другое' },
 ];
 
